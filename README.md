@@ -2,10 +2,10 @@
 
 租户视角与上游集群之间的**翻译规则**,以及描述这个边界的类型。
 
-`kubezoo-proxy`(请求路径)和 `kubezoo-controller`(对账循环)**都**依赖它,而且**只能有这一份**。
+`kubezoo-gateway`(请求路径)和 `kubezoo-controller`(对账循环)**都**依赖它,而且**只能有这一份**。
 
 ```
-kubezoo-proxy  ─┐
+kubezoo-gateway  ─┐
                 ├─→ kubezoo-contract
 kubezoo-controller ─┘
 ```
