@@ -53,8 +53,13 @@ kubezoo-controller ─┘
 另外两个仓库通过 **tag** 依赖这里,不是通过本地路径:
 
 ```
-require github.com/fivetime/kubezoo-contract v0.1.0
+require github.com/fivetime/kubezoo-contract v0.7.0
 ```
+
+**v0.7.0 是一次破坏性变更**:`ConvertInternalListOptions` 多了一个 `ListOptionScope`
+参数。它必须知道调用方是什么资源 —— `metadata.name` 在集群级资源上要加租户前缀、在
+namespace 级资源上不能加,而 CRD 的前缀又在名字**中间**。少了这个参数它只能猜,
+猜错的表现是**匹配不到任何东西且不报错**,客户端被告知世界是空的。
 
 ⚠️ **改了这里就要重新打 tag**,再更新两个消费者的版本号 —— 没有 `replace ../` 那种
 "改完立刻生效"的便利了。开发期嫌烦可以本地临时 `go mod edit -replace`,
