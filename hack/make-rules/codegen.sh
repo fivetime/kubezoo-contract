@@ -326,11 +326,22 @@ run_client() {
 
 # ---------------------------------------------------------------------------
 # Not covered here, and still without a recipe:
-#   protobuf  pkg/apis/*/v1alpha1/generated.{proto,pb.go}  (needs go-to-protobuf,
-#             which wants the k8s protobuf toolchain, not just protoc)
 #   crd       pkg/apis/*/zz.generated.crd.go               (needs controller-gen)
-# Both are stable as long as the owned API types do not change. Add them when
-# they next need to move.
+# Stable as long as the owned API types do not change. Add it when it next needs
+# to move.
+#
+# ⚠️ This block used to name protobuf as the uncovered one. It has had a recipe
+# for some time -- run_protobuf above, and "protobuf" is in the default TARGETS.
+# A note about what is unguarded is the one place a reader will trust, so being
+# wrong here is worse than saying nothing: it points at something covered while
+# leaving the actual gap unnamed.
+#
+# ⭐ Also removed: pkg/generated/openapi. It was 2.7k lines of generated code with
+# no importer in any of the three repositories, no target here, and already stale
+# against its own types -- it described Tenant but not TenantSuspension, which is
+# the field the gateway's suspension filter turns on. verify-codegen passed over
+# it precisely because nothing regenerated it: a tree-diff can only catch files
+# this script produces, so an orphan is invisible to the guard by construction.
 # ---------------------------------------------------------------------------
 
 mkdir -p "${BIN_DIR}"

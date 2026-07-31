@@ -34,6 +34,18 @@ jobs:
       # the code calls the functions it calls.
       - name: Tests
         run: make test
+      # ⚠️ codegen's protobuf target shells out to protoc, and go-to-protobuf
+      # log.Fatalf's when it is not on PATH. Without this the step below is red on
+      # arrival -- and a guard that is red on arrival gets deleted, which is worse
+      # than not having written it.
+      #
+      # Pinned, because generated .pb.go can differ between protoc versions and an
+      # unpinned one turns "the types changed" into "the runner changed".
+      - name: Install protoc
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y protobuf-compiler=3.21.12-*
+          protoc --version
       # ⭐ 68k lines of generated code that cannot be hand-edited into agreement
       # with their source types. The protobuf half is why this is a guard: a field
       # added without regenerating is accepted by the API server, reported as

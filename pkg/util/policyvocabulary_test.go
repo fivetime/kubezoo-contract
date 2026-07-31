@@ -53,10 +53,21 @@ func TestPoliciesDeriveTheTenantTheSameWayGoDoes(t *testing.T) {
 
 	// Ways of saying "up to the first dash", which is the wrong rule however it
 	// is spelled.
+	//
+	// ⚠️ These describe the RULE, not the three strings that were removed when it
+	// was first fixed. The first version of this test was a transcription of
+	// those three, including the CEL method form with double quotes -- and the
+	// one policy that still had the bug wrote it with single quotes, which is the
+	// house style everywhere else in these files. The test passed, the bug sat
+	// there, and the backstop below was satisfied by the files that had been
+	// fixed. An enumeration of past mistakes cannot catch the next one.
 	firstDash := []*regexp.Regexp{
-		regexp.MustCompile(`split\(request\.namespace,\s*'-'\)`),
-		regexp.MustCompile(`request\.namespace\.split\("-"\)`),
-		regexp.MustCompile(`regex_replace_all\('\^\[\^-\]\+-'`),
+		// JMESPath: split(<anything>, '-') / split(<anything>, "-")
+		regexp.MustCompile(`split\([^)]*,\s*['"]-['"]\)`),
+		// CEL: <anything>.split('-') / .split("-"), on a namespace or a username
+		regexp.MustCompile(`\.split\(['"]-['"]\)`),
+		// Regex form: strip everything up to the first dash
+		regexp.MustCompile(`\^\[\^-\]\+-`),
 	}
 
 	derives := 0
