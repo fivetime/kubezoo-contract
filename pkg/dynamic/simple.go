@@ -346,12 +346,19 @@ func (c *dynamicResourceClient) Patch(ctx context.Context, name string, pt types
 	if len(name) == 0 {
 		return nil, false, fmt.Errorf("name is required")
 	}
-	result := c.client.client.
+	req := c.client.client.
 		Patch(pt).
 		AbsPath(append(c.makeURLSegments(name), subresources...)...).
 		Body(data).
-		SpecificallyVersionedParams(&opts, dynamicParameterCodec, versionV1).
-		Do(ctx)
+		SpecificallyVersionedParams(&opts, dynamicParameterCodec, versionV1)
+	// ⚠️ This used to go up unimpersonated, alone among the verbs. The client is
+	// shared and carries kubezoo's own certificate, so a forwarded server-side
+	// apply was authorized as kubezoo rather than as the tenant -- and upstream
+	// RBAC is the layer this design leans on rather than a nicety, since kubezoo
+	// itself authorizes with AlwaysAllow. Nothing pinned it because no verb's
+	// test asserted headers; client_test.go now does, for every verb.
+	setImpersonateHeaders(req, ctx)
+	result := req.Do(ctx)
 	if err := result.Error(); err != nil {
 		return nil, false, err
 	}

@@ -478,3 +478,41 @@ func TestNewCheckGroupKindFunc(t *testing.T) {
 		})
 	}
 }
+
+// TestTenantIDFromPrefixedIsFixedLength guards against reading the tenant id by
+// splitting on the first dash.
+//
+// ⚠️ ValidateTenantName only requires the *first* character not to be a dash, so
+// a tenant may be called ab-cde. Callers that cut on the first dash read "ab",
+// enqueued work for a tenant that does not exist, and dropped it -- silently, and
+// only for tenants whose names carry a dash.
+func TestTenantIDFromPrefixedIsFixedLength(t *testing.T) {
+	cases := []struct {
+		prefixed string
+		want     string
+		wantErr  bool
+	}{
+		{prefixed: "111111-default", want: "111111"},
+		{prefixed: "ab-cde-kube-system", want: "ab-cde"},
+		{prefixed: "ab-cde-example.com", want: "ab-cde"},
+		{prefixed: "a-b-cd-x", want: "a-b-cd"},
+		{prefixed: "short", wantErr: true},
+		{prefixed: "1111112-nodash-at-six", wantErr: true},
+	}
+	for _, tc := range cases {
+		got, err := TenantIDFromPrefixed(tc.prefixed)
+		if tc.wantErr {
+			if err == nil {
+				t.Errorf("TenantIDFromPrefixed(%q) = %q, want an error", tc.prefixed, got)
+			}
+			continue
+		}
+		if err != nil {
+			t.Errorf("TenantIDFromPrefixed(%q): %v", tc.prefixed, err)
+			continue
+		}
+		if got != tc.want {
+			t.Errorf("TenantIDFromPrefixed(%q) = %q, want %q", tc.prefixed, got, tc.want)
+		}
+	}
+}

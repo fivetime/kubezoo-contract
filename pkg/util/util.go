@@ -136,13 +136,25 @@ func ValidateTenantName(tenantId string) *string {
 
 // GetTenantIDFromNamespace get the tenantId from the prefix of namespace.
 func GetTenantIDFromNamespace(namespace string) (string, error) {
-	if len(namespace) < TenantIDLength+2 {
+	return TenantIDFromPrefixed(namespace)
+}
+
+// TenantIDFromPrefixed reads the tenant id off anything kubezoo prefixed --
+// a namespace, an API group, a cluster-scoped object's name.
+//
+// ⚠️ The tenant id is a fixed TenantIDLength characters and only the *first*
+// character of a tenant name is required not to be a dash, so splitting on the
+// first dash is wrong for every tenant whose name carries one. Callers that did
+// so read "ab" out of "ab-cde-something" and then dropped the work as belonging
+// to a tenant that does not exist.
+func TenantIDFromPrefixed(prefixed string) (string, error) {
+	if len(prefixed) < TenantIDLength+2 {
 		return "", invalidPrefixedNamespaceErr
 	}
-	if namespace[TenantIDLength] != '-' {
+	if prefixed[TenantIDLength] != '-' {
 		return "", invalidPrefixedNamespaceErr
 	}
-	return namespace[:TenantIDLength], nil
+	return prefixed[:TenantIDLength], nil
 }
 
 // AddTenantIDToUserInfo add the tenantId to the extra of userinfo.
@@ -482,14 +494,48 @@ func TenantFrom(ctx context.Context) (string, bool) {
 	return "", false
 }
 
-// ConvertInternalListOptions converts internal versions to v1 version.
-func ConvertInternalListOptions(ctx context.Context, options *metainternalversion.ListOptions, tenantID string) (*metav1.ListOptions, error) {
+// ListOptionScope describes the resource a list or watch is against. A field
+// selector cannot be rewritten without it: whether metadata.name carries a
+// tenant prefix upstream depends on whether the resource is cluster-scoped, and
+// how it carries one depends on the kind.
+type ListOptionScope struct {
+	NamespaceScoped bool
+	Kind            schema.GroupVersionKind
+}
+
+// ConvertInternalListOptions converts internal versions to v1 version, rewriting
+// the field selector into the upstream's terms.
+//
+// ⚠️ Only involvedObject.namespace used to be rewritten, and the two that matter
+// most were passed through untouched. Both fail the same silent way -- they
+// match nothing upstream and the request succeeds, so the client is told the
+// world is empty rather than told it asked the wrong question:
+//
+//   - metadata.name against a cluster-scoped resource. Every cluster-scoped
+//     object is prefixed upstream and the selector was not, so a single-object
+//     informer -- fields.OneTermEqualSelector("metadata.name", ...), the standard
+//     client-go pattern for watching one CRD, IngressClass, PV or webhook
+//     configuration -- watched an empty world forever.
+//   - metadata.namespace against a cross-namespace list, which the fan-out
+//     forwards verbatim into each prefixed namespace.
+func ConvertInternalListOptions(ctx context.Context, options *metainternalversion.ListOptions,
+	tenantID string, scope ListOptionScope) (*metav1.ListOptions, error) {
 	var err error
 	out := &metav1.ListOptions{}
 	if options.FieldSelector != nil {
 		fn := func(label, value string) (string, string, error) {
-			if label == "involvedObject.namespace" && value != "" && tenantID != "" {
-				value = tenantID + "-" + value
+			if value == "" || tenantID == "" {
+				return label, value, nil
+			}
+			switch label {
+			case "involvedObject.namespace", "metadata.namespace":
+				// Idempotent: the fan-out and the connect proxy both address
+				// namespaces by their upstream name in places.
+				value = UpstreamNamespace(tenantID, value)
+			case "metadata.name":
+				if !scope.NamespaceScoped {
+					value = ConvertTenantObjectNameToUpstream(value, tenantID, scope.Kind)
+				}
 			}
 			return label, value, nil
 		}
@@ -807,4 +853,32 @@ func WithApplyForce(ctx context.Context, force bool) context.Context {
 func ApplyForceFrom(ctx context.Context) bool {
 	force, ok := ctx.Value(applyForceKey{}).(bool)
 	return ok && force
+}
+
+// applyPatchKey marks a request that really is a server-side apply.
+type applyPatchKey struct{}
+
+// WithApplyPatch records that this request arrived as a server-side apply.
+//
+// ⚠️ kubezoo used to infer this from the object instead: it forwarded a write
+// upstream as an apply whenever the object's managedFields happened to carry an
+// Apply entry for the same field manager. That is a property of the object's
+// history, not of the request. A manager that applies once and thereafter issues
+// ordinary updates -- controller-runtime with a FieldOwner set, or anything
+// passing --field-manager -- keeps that entry forever, so its PUTs were rewritten
+// into applies of whatever the old entry owned, and the rest of the PUT was
+// dropped. Worse, the apiserver moves a changed path out of the Apply entry into
+// an Update entry, so a PUT that changed a value the manager had applied earlier
+// left that path out of the forwarded apply and upstream *deleted* it. 200 OK,
+// no warning.
+//
+// The verb is on the request, so it is read from the request.
+func WithApplyPatch(ctx context.Context) context.Context {
+	return context.WithValue(ctx, applyPatchKey{}, true)
+}
+
+// IsApplyPatch reports whether this request is a server-side apply.
+func IsApplyPatch(ctx context.Context) bool {
+	apply, ok := ctx.Value(applyPatchKey{}).(bool)
+	return ok && apply
 }
