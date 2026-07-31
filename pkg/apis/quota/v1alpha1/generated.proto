@@ -18,7 +18,7 @@ limitations under the License.
 
 syntax = "proto2";
 
-package github.com.kubewharf.kubezoo.pkg.apis.quota.v1alpha1;
+package github.com.fivetime.kubezoo_contract.pkg.apis.quota.v1alpha1;
 
 import "k8s.io/api/core/v1/generated.proto";
 import "k8s.io/apimachinery/pkg/apis/meta/v1/generated.proto";
@@ -26,7 +26,7 @@ import "k8s.io/apimachinery/pkg/runtime/generated.proto";
 import "k8s.io/apimachinery/pkg/runtime/schema/generated.proto";
 
 // Package-wide variables from generator "generated".
-option go_package = "github.com/kubewharf/kubezoo/pkg/apis/quota/v1alpha1";
+option go_package = "github.com/fivetime/kubezoo-contract/pkg/apis/quota/v1alpha1";
 
 // ClusterResourceQuota is the Schema for the clusterresourcequota API
 message ClusterResourceQuota {

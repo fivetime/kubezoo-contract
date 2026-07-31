@@ -24,5 +24,18 @@ test-integration: envtest
 	@KUBEBUILDER_ASSETS="$$($(CURDIR)/bin/setup-envtest use $(ENVTEST_K8S_VERSION) -p path)" \
 		$(GO) test -count=1 ./pkg/util
 
+# ⭐ The generated code is 68k lines and cannot be hand-edited into agreement with
+# its source types. The protobuf half is the reason this is a guard and not a
+# convenience: a field added to a type without regenerating the marshaller is
+# accepted by the API server, reported as created, and then silently absent when
+# read back.
+.PHONY: codegen
+codegen:
+	@bash hack/make-rules/codegen.sh
+
+.PHONY: verify-codegen
+verify-codegen:
+	@bash hack/make-rules/codegen.sh --verify
+
 .PHONY: test
 test: test-unit test-integration

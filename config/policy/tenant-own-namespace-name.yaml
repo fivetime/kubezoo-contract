@@ -49,7 +49,15 @@ spec:
         # 而不是按长度截断:namespace 名字里本来就可能有 `-`。
         - name: tenantNamespace
           variable:
-            jmesPath: "regex_replace_all('^[^-]+-', request.namespace, '')"
+            # ⚠️ 租户 ID 是**前 6 个字符**,所以租户视角的名字 = 去掉前 7 个字符。
+            # 权威实现在 Go 侧的 util.GetTenantIDFromNamespace(namespace[:6],
+            # 且校验 namespace[6] == '-')。
+            # ⛔ 原来写的是 regex_replace_all('^[^-]+-', ...) —— "第一个 - 之前"。
+            # 而 ValidateTenantName **允许租户 ID 里含 '-'**(只要不在开头),
+            # 所以 `ab-123-default` 会被算成 `123-default`,Pod 拿着它去请求,
+            # kubezoo 再前缀一次变成 `ab-123-123-default` ⇒ NotFound。
+            # 那正是这条策略本来要修的 cert-manager 故障。
+            jmesPath: "trim_prefix(request.namespace, truncate(request.namespace, `7`))"
       # 没有这样的变量就什么都不改 —— 否则每个 Pod 都会被加上它没要的 env。
       preconditions:
         all:

@@ -35,8 +35,14 @@ spec:
   variables:
     # namespace 上游形如 <租户ID>-<租户视角的名字>,而租户伪造不了这个前缀:
     # kubezoo 在写入时强制加上,并拒绝租户把 kubezoo.io/tenant 标签改成别人的。
+      # ⚠️ 租户 ID 是 namespace 的**前 6 个字符**,不是"第一个 - 之前的部分"。
+      # Go 侧的权威实现是 util.GetTenantIDFromNamespace:取 namespace[:6],
+      # 并校验 namespace[6] == '-'。而 ValidateTenantName **允许租户 ID 里含 '-'**
+      # (只要不在开头),例如 `ab-123` 是合法的 6 位 ID。
+      # ⛔ 用 split("-")[0] 的话,`ab-123` 和 `ab-456` 会算出同一个租户 ——
+      # 这条策略要防的跨租户主机名抢占,会被这个推导本身重新打开。
     - name: tenantSuffix
-      expression: '"." + request.namespace.split("-")[0] + ".TENANT_DOMAIN_SUFFIX"'
+      expression: '"." + request.namespace.substring(0, 6) + ".TENANT_DOMAIN_SUFFIX"'
   validations:
     # 空 host 表示"匹配所有主机名",那等于把整个入口占了,必须拒。
     - expression: >-

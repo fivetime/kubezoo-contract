@@ -37,13 +37,13 @@ spec:
           - op: add
             path: /spec/nodeSelector
             value:
-              kubezoo.io/pool: "{{ split(request.namespace, '-') | [0] }}"
+              kubezoo.io/pool: "{{ truncate(request.namespace, `6`) }}"
           - op: add
             path: /spec/tolerations
             value:
               - key: kubezoo.io/pool
                 operator: Equal
-                value: "{{ split(request.namespace, '-') | [0] }}"
+                value: "{{ truncate(request.namespace, `6`) }}"
                 effect: NoSchedule
               - key: node.kubernetes.io/not-ready
                 operator: Exists
@@ -76,13 +76,13 @@ spec:
           - op: add
             path: /spec/template/spec/nodeSelector
             value:
-              kubezoo.io/pool: "{{ split(request.namespace, '-') | [0] }}"
+              kubezoo.io/pool: "{{ truncate(request.namespace, `6`) }}"
           - op: add
             path: /spec/template/spec/tolerations
             value:
               - key: kubezoo.io/pool
                 operator: Equal
-                value: "{{ split(request.namespace, '-') | [0] }}"
+                value: "{{ truncate(request.namespace, `6`) }}"
                 effect: NoSchedule
               - key: node.kubernetes.io/not-ready
                 operator: Exists
@@ -115,13 +115,13 @@ spec:
           - op: add
             path: /spec/jobTemplate/spec/template/spec/nodeSelector
             value:
-              kubezoo.io/pool: "{{ split(request.namespace, '-') | [0] }}"
+              kubezoo.io/pool: "{{ truncate(request.namespace, `6`) }}"
           - op: add
             path: /spec/jobTemplate/spec/template/spec/tolerations
             value:
               - key: kubezoo.io/pool
                 operator: Equal
-                value: "{{ split(request.namespace, '-') | [0] }}"
+                value: "{{ truncate(request.namespace, `6`) }}"
                 effect: NoSchedule
               - key: node.kubernetes.io/not-ready
                 operator: Exists
@@ -154,13 +154,13 @@ spec:
           - op: add
             path: /template/spec/nodeSelector
             value:
-              kubezoo.io/pool: "{{ split(request.namespace, '-') | [0] }}"
+              kubezoo.io/pool: "{{ truncate(request.namespace, `6`) }}"
           - op: add
             path: /template/spec/tolerations
             value:
               - key: kubezoo.io/pool
                 operator: Equal
-                value: "{{ split(request.namespace, '-') | [0] }}"
+                value: "{{ truncate(request.namespace, `6`) }}"
                 effect: NoSchedule
               - key: node.kubernetes.io/not-ready
                 operator: Exists
