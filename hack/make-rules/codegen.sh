@@ -254,8 +254,7 @@ run_openapi() {
     "${OWNED_APIS[@]}"
 }
 
-# OpenAPI for the Kubernetes APIs KubeZoo proxies -> pkg/apis/openapi
-# This is the file that previously had no recipe.
+# Typed clients, listers and informers for the owned APIs.
 run_client() {
   install_gen client-gen k8s.io/code-generator/cmd/client-gen k8s.io/code-generator
   install_gen lister-gen k8s.io/code-generator/cmd/lister-gen k8s.io/code-generator

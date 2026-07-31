@@ -5,7 +5,6 @@ go 1.26.0
 toolchain go1.26.5
 
 require (
-	github.com/go-test/deep v1.0.8
 	github.com/pkg/errors v0.9.1
 	k8s.io/api v0.36.3
 	k8s.io/apiextensions-apiserver v0.36.0
@@ -110,3 +109,15 @@ replace (
 	k8s.io/system-validators => k8s.io/system-validators v1.7.0
 	k8s.io/utils => k8s.io/utils v0.0.0-20260210185600-b8788abfbbc2
 )
+
+// ⚠️ A replace with no require, deliberately. Nothing here imports
+// kube-aggregator -- `go mod why` says so, which is what misled me into deleting
+// this line. But k8s.io/kubernetes v1.36.3 requires every staging repository at
+// the placeholder v0.0.0 and replaces each with a relative path, and a path
+// replace does not carry downstream. So every consumer of k8s.io/kubernetes has
+// to resolve those versions itself, whether or not it compiles them.
+//
+// Deleting it leaves `go build`, `go vet`, `go test` and `go mod tidy` all green
+// -- module graph pruning never loads the full graph -- while `go list -m all`
+// and `go mod download all` fail with "invalid version: unknown revision v0.0.0".
+replace k8s.io/kube-aggregator => k8s.io/kube-aggregator v0.36.3
