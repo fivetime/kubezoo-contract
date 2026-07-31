@@ -53,7 +53,7 @@ VERIFY=false
 [[ "${1:-}" == "--verify" ]] && VERIFY=true
 
 # Targets to run, in order. Override with TARGETS="deepcopy openapi".
-TARGETS="${TARGETS:-deepcopy defaulter register protobuf openapi openapi-served client}"
+TARGETS="${TARGETS:-deepcopy defaulter register protobuf openapi client}"
 
 # ---------------------------------------------------------------------------
 # The APIs this repository owns.
@@ -74,46 +74,18 @@ GENERATED_REGISTER_APIS=(
 )
 
 # ---------------------------------------------------------------------------
-# OpenAPI inputs for pkg/apis/openapi -- the APIs KubeZoo serves to tenants.
+# ⭐ pkg/apis/openapi is NOT generated here any more. It holds the OpenAPI
+# definitions for the Kubernetes APIs the gateway serves to tenants, and it is
+# generated from k8s.io/api/... -- Kubernetes' own types, which this module has
+# no relationship with. Only the gateway imports the result, so it is generated
+# there: kubezoo-gateway/hack/make-rules/codegen.sh.
 #
-# Recovered from the schemas present in the previously unreproducible file.
+# Everything still generated here is generated from the API types this module
+# owns. That is the line: not which script, but which source.
 #
-# Deliberately omitted (~100 schemas that the old file carried):
-#   k8s.io/cloud-provider/config/...          component configuration file
-#   k8s.io/controller-manager/config/...      formats, not APIs KubeZoo serves
-#   k8s.io/kube-controller-manager/config/...
-#   k8s.io/kubelet/config/...
-#   k8s.io/kube-proxy/config/...
-#   k8s.io/kube-scheduler/config/...
-#   k8s.io/metrics/pkg/apis/...               served by metrics-server, not KubeZoo
-#
-# They came in when KubeZoo copied kube-apiserver's OpenAPI target list. Nothing
-# outside the generated file itself references them, and cloud-provider's config
-# additionally fails generation ("not sure how to enforce default for Unsupported").
-# Add a package back here if KubeZoo ever starts serving it.
+# It was 65k lines and the sole reason this module required
+# k8s.io/kube-aggregator, in a module both other repositories must consume.
 # ---------------------------------------------------------------------------
-openapi_served_inputs() {
-  local api_groups
-  # Every k8s.io/api group/version the repository has types registered for.
-  api_groups="$(go list k8s.io/api/... 2>/dev/null \
-    | grep -E '^k8s\.io/api/[a-z0-9]+/v[0-9a-z]+$' | sort -u | tr '\n' ',')"
-
-  echo -n "${api_groups}"
-  echo -n "k8s.io/apimachinery/pkg/apis/meta/v1,"
-  echo -n "k8s.io/apimachinery/pkg/apis/meta/v1beta1,"
-  echo -n "k8s.io/apimachinery/pkg/api/resource,"
-  echo -n "k8s.io/apimachinery/pkg/runtime,"
-  echo -n "k8s.io/apimachinery/pkg/util/intstr,"
-  echo -n "k8s.io/apimachinery/pkg/version,"
-  echo -n "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1,"
-  echo -n "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1,"
-  echo -n "k8s.io/kube-aggregator/pkg/apis/apiregistration/v1,"
-  echo -n "k8s.io/kube-aggregator/pkg/apis/apiregistration/v1beta1,"
-  echo -n "k8s.io/apiserver/pkg/apis/audit/v1,"
-  echo -n "k8s.io/client-go/pkg/apis/clientauthentication/v1,"
-  echo -n "k8s.io/client-go/pkg/apis/clientauthentication/v1beta1,"
-  echo -n "k8s.io/kubernetes/pkg/apis/abac/v1beta1"
-}
 
 # ---------------------------------------------------------------------------
 # Tooling. Versions follow go.mod, replace directives included, so a version
@@ -284,18 +256,6 @@ run_openapi() {
 
 # OpenAPI for the Kubernetes APIs KubeZoo proxies -> pkg/apis/openapi
 # This is the file that previously had no recipe.
-run_openapi_served() {
-  install_gen openapi-gen k8s.io/kube-openapi/cmd/openapi-gen k8s.io/kube-openapi
-  local inputs
-  IFS=, read -r -a inputs <<< "$(openapi_served_inputs)"
-  run_quiet "${BIN_DIR}/openapi-gen" \
-    --go-header-file "${HEADER}" \
-    --output-dir "${WORK_ROOT}/pkg/apis/openapi" \
-    --output-pkg "${MODULE}/pkg/apis/openapi" \
-    --output-file zz_generated.openapi.go \
-    "${inputs[@]}"
-}
-
 run_client() {
   install_gen client-gen k8s.io/code-generator/cmd/client-gen k8s.io/code-generator
   install_gen lister-gen k8s.io/code-generator/cmd/lister-gen k8s.io/code-generator
@@ -356,7 +316,6 @@ for target in ${TARGETS}; do
     register)       run_register ;;
     protobuf)       run_protobuf ;;
     openapi)        run_openapi ;;
-    openapi-served) run_openapi_served ;;
     client)         run_client ;;
     *) echo "unknown target: ${target}" >&2; exit 1 ;;
   esac
