@@ -64,6 +64,20 @@ const (
 	// set pod-security enforce: privileged on its own namespace.
 	StorageClassPublishedLabelKey = "storageclass.kubezoo.io/published"
 	IngressClassPublishedLabelKey = "ingressclass.kubezoo.io/published"
+	// VolumeAttributesClassPublishedLabelKey marks a VolumeAttributesClass a
+	// tenant may name in spec.volumeAttributesClassName.
+	//
+	// ⭐ Publishing NONE is the useful default here, unlike the other two. A
+	// VolumeAttributesClass carries the CSI driver's IOPS and throughput
+	// parameters, so naming one is asking for a performance tier -- something a
+	// platform sells rather than something a tenant picks freely. With no class
+	// labelled, no tenant can set the field at all, and a platform that does
+	// offer tiers labels exactly those.
+	//
+	// ⚠️ Unlike storageClassName this field is MUTABLE after the claim is bound,
+	// so the refusal cannot be create-only. See
+	// tenantProxy.refuseUnpublishedVolumeAttributesClass.
+	VolumeAttributesClassPublishedLabelKey = "volumeattributesclass.kubezoo.io/published"
 
 	// PublishedTrue means tenants may see the class and use it for new objects.
 	PublishedTrue = "true"

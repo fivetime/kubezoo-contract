@@ -69,7 +69,12 @@ func ClusterScopedRules() []rbacv1.PolicyRule {
 		// spec.storageClassName through untranslated); what this adds is the
 		// ability to find out which ones exist.
 		rbacv1helpers.NewRule("get", "list", "watch").
-			Groups("storage.k8s.io").Resources("storageclasses").RuleOrDie(),
+			Groups("storage.k8s.io").Resources("storageclasses",
+			// Same shape, and the same reason to be discoverable: a claim naming
+			// an unpublished VolumeAttributesClass is now refused, and refusing a
+			// name the tenant cannot enumerate is the complaint that motivated
+			// publishing storage classes in the first place.
+			"volumeattributesclasses").RuleOrDie(),
 
 		// Prefixed by the convertor, so tenants cannot collide or reach each
 		// other's.
