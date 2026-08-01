@@ -20,8 +20,8 @@ import (
 	"testing"
 
 	extensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
-	extensionsinformers "k8s.io/apiextensions-apiserver/pkg/client/informers/externalversions"
 	extensionsfake "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset/fake"
+	extensionsinformers "k8s.io/apiextensions-apiserver/pkg/client/informers/externalversions"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -83,7 +83,7 @@ func TestTenantCRDResolvesInBothDirections(t *testing.T) {
 				t.Fatalf("resolving %s: %v", tc.group, err)
 			}
 			if !customResourceGroup {
-				t.Errorf("the tenant's own CRD was not reported as the tenant's; the group would "+
+				t.Errorf("the tenant's own CRD was not reported as the tenant's; the group would " +
 					"be left prefixed and the tenant could not apply the object back")
 			}
 			if !namespaced {
