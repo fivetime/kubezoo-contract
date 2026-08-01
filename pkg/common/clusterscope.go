@@ -58,6 +58,19 @@ func ClusterScopedRules() []rbacv1.PolicyRule {
 		rbacv1helpers.NewRule("get", "list", "watch").
 			Groups("").Resources("nodes", "componentstatuses").RuleOrDie(),
 
+		// Read-only, and narrowed again by kubezoo: only the names
+		// --public-storage-classes publishes are served, under their real names.
+		// A StorageClass is the platform's object, never a tenant's -- there are
+		// no write verbs here and none are installed in the API surface either.
+		//
+		// The grant exists so that upstream RBAC still applies to the read, rather
+		// than the allowlist being the only boundary. A tenant could already
+		// reference a class successfully (pkg/convert/pvc.go passes
+		// spec.storageClassName through untranslated); what this adds is the
+		// ability to find out which ones exist.
+		rbacv1helpers.NewRule("get", "list", "watch").
+			Groups("storage.k8s.io").Resources("storageclasses").RuleOrDie(),
+
 		// Prefixed by the convertor, so tenants cannot collide or reach each
 		// other's.
 		rbacv1helpers.NewRule("get", "list", "watch", "create", "update", "patch",
