@@ -19,6 +19,7 @@ package util
 import (
 	"context"
 	"reflect"
+	"sync"
 	"testing"
 
 	"k8s.io/apiserver/pkg/authentication/user"
@@ -148,4 +149,42 @@ func TestImpersonationGroups(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestAddTenantIDToUserInfoCopiesExtra guards a whole-gateway fatal error.
+//
+// ⚠️ The token cache hands back the same *authenticator.Response for every
+// request presenting a token during its ten-second TTL, so the user.Info -- and
+// its Extra map -- is shared. Writing into it meant two concurrent requests from
+// one pod wrote the same map: `fatal error: concurrent map writes`, a runtime
+// throw WithPanicRecovery cannot catch. Any informer a tenant deploys does this.
+func TestAddTenantIDToUserInfoCopiesExtra(t *testing.T) {
+	shared := &user.DefaultInfo{
+		Name:  "system:serviceaccount:111111-default:builder",
+		Extra: map[string][]string{"authentication.kubernetes.io/credential-id": {"JTI=x"}},
+	}
+
+	out := AddTenantIDToUserInfo("111111", shared)
+
+	if _, written := shared.Extra[TenantIDKey]; written {
+		t.Fatal("the caller's Extra map was written in place; it is shared by the token cache " +
+			"across concurrent requests and this is a fatal concurrent map write")
+	}
+	if got := out.GetExtra()[TenantIDKey]; len(got) != 1 || got[0] != "111111" {
+		t.Errorf("tenant id = %v, want [111111]", got)
+	}
+	if got := out.GetExtra()["authentication.kubernetes.io/credential-id"]; len(got) != 1 {
+		t.Error("the original Extra entries were lost")
+	}
+
+	// Concurrent use of one shared info must be safe; run with -race.
+	var wg sync.WaitGroup
+	for i := 0; i < 16; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			AddTenantIDToUserInfo("111111", shared)
+		}()
+	}
+	wg.Wait()
 }

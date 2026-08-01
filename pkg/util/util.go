@@ -20,7 +20,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"strings"
+
+	authenticationv1 "k8s.io/api/authentication/v1"
 
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	extensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
@@ -158,10 +161,24 @@ func TenantIDFromPrefixed(prefixed string) (string, error) {
 }
 
 // AddTenantIDToUserInfo add the tenantId to the extra of userinfo.
+//
+// ⚠️ The Extra map is COPIED, never written in place. For a ServiceAccount token
+// the user.Info comes out of cachedTokenAuthenticator, which hands back the same
+// *authenticator.Response pointer for every request presenting that token during
+// its ten-second TTL -- and Extra is always non-nil there, since the token's JTI
+// is recorded as a credential id. Writing into it meant two concurrent requests
+// from one pod wrote the same map at once: `fatal error: concurrent map writes`,
+// a runtime throw that WithPanicRecovery cannot catch, so the whole gateway dies
+// and every tenant loses the API until it restarts. Any informer or controller a
+// tenant deploys makes concurrent requests on one token, so this needed no
+// malice.
+//
+// Same shape as two earlier defects in this codebase: an object somebody else
+// owns, written in place. pkg/proxy/fanout.go already copies for this same key.
 func AddTenantIDToUserInfo(tenantID string, info user.Info) user.Info {
-	extra := info.GetExtra()
-	if extra == nil {
-		extra = map[string][]string{}
+	extra := make(map[string][]string, len(info.GetExtra())+1)
+	for key, value := range info.GetExtra() {
+		extra[key] = value
 	}
 	extra[TenantIDKey] = []string{tenantID}
 	return &user.DefaultInfo{
@@ -881,4 +898,32 @@ func WithApplyPatch(ctx context.Context) context.Context {
 func IsApplyPatch(ctx context.Context) bool {
 	apply, ok := ctx.Value(applyPatchKey{}).(bool)
 	return ok && apply
+}
+
+// DropClientImpersonation removes every Impersonate-* header the client sent, so
+// that only the ones kubezoo sets itself reach upstream.
+//
+// ⚠️ The exec, logs, attach, port-forward and /proxy paths relay the tenant's own
+// *http.Request. They set Impersonate-User and Impersonate-Group and then hand
+// the whole header set to NewUpgradeAwareHandler, which copies all of it -- so a
+// client's Impersonate-Uid and Impersonate-Extra-* travelled on untouched.
+// kubezoo connects upstream with a cluster-admin certificate, so upstream
+// honours them: the audit record's impersonatedUser and any third-party
+// admission webhook's request.userInfo carried whatever the tenant chose.
+// Kubernetes' own WithImpersonation deletes the whole family after consuming it
+// for exactly this reason, and kubezoo's hand-built chain does not install it.
+//
+// Not an escalation -- RBAC ignores uid and extra, and none of the policies in
+// this repository key on them -- but it is a tenant writing the platform's audit
+// trail, and these two are the only paths that relay a client's whole header set.
+func DropClientImpersonation(header http.Header) {
+	for name := range header {
+		canonical := http.CanonicalHeaderKey(name)
+		if canonical == authenticationv1.ImpersonateUserHeader ||
+			canonical == authenticationv1.ImpersonateGroupHeader ||
+			canonical == authenticationv1.ImpersonateUIDHeader ||
+			strings.HasPrefix(canonical, authenticationv1.ImpersonateUserExtraHeaderPrefix) {
+			delete(header, name)
+		}
+	}
 }
