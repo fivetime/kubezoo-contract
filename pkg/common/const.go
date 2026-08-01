@@ -40,6 +40,42 @@ const (
 	// the tenant's own RoleBindings, which share the namespace and must not
 	// appear when it lists ClusterRoleBindings -- nor the other way round.
 	ProjectedClusterRoleBindingLabelKey = "kubezoo.io/clusterrolebinding"
+
+	// StorageClassPublishedLabelKey and IngressClassPublishedLabelKey mark the
+	// platform's own class objects as offered to tenants.
+	//
+	// The key is qualified by the resource rather than being one shared
+	// kubezoo.io/published, which is the shape Kubernetes itself uses for
+	// markers on these objects -- storageclass.kubernetes.io/is-default-class,
+	// ingressclass.kubernetes.io/is-default-class. It reads as what it is in a
+	// selector, and adding runtimeclass or volumesnapshotclass later needs no new
+	// vocabulary. The other kubezoo.io/* labels are a different thing: they are
+	// stamped on a TENANT's objects, while these are stamped by the platform on
+	// its own.
+	//
+	// A label rather than an annotation, unlike the Kubernetes markers above,
+	// because these drive an informer's selector and a selector cannot match an
+	// annotation.
+	//
+	// ⚠️ Only the platform can set these: a tenant has no write verb on
+	// storageclasses at all, and an IngressClass a tenant writes is name-prefixed
+	// into its own space. That is what makes it safe to key behaviour on them --
+	// see the rule in config/policy/README.md, which exists because a tenant once
+	// set pod-security enforce: privileged on its own namespace.
+	StorageClassPublishedLabelKey = "storageclass.kubezoo.io/published"
+	IngressClassPublishedLabelKey = "ingressclass.kubezoo.io/published"
+
+	// PublishedTrue means tenants may see the class and use it for new objects.
+	PublishedTrue = "true"
+	// PublishedDeprecated means tenants may still SEE the class -- so that an
+	// existing reference is explicable and the tenant can read that it is on the
+	// way out -- while new references are refused.
+	//
+	// The two states are separate from "no label at all" on purpose. Removing a
+	// label has to stay a safe, reversible act: an operator tidying up, or fixing
+	// a typo, must not silently stop some tenant's StatefulSet from scaling.
+	// Retiring a class is a different intention and says so.
+	PublishedDeprecated = "deprecated"
 )
 
 // ReservedClusterRoleNames are the upstream names kubezoo keeps for itself, per
