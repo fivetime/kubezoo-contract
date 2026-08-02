@@ -120,6 +120,21 @@ k8s 的语义是"cluster-scoped 资源永不跳过策略"。少了 `scope: Names
 21 条断言,每条都**提交一个必须被拒的东西再看它被谁拒**。已验证摘掉策略会红。
 `READY=True` 不是证据 —— 本项目在这上面栽过四次。
 
+⛔ **跑之前必须带 `KUBEZOO_CONTRACT_DIR`,否则你改的策略根本不上场。**
+
+```bash
+KUBEZOO_CONTRACT_DIR=/root/kubezoo-contract hack/lab/up.sh && hack/lab/verify.sh
+```
+
+lab **默认装 go.mod 钉住的那个 contract 版本的策略**,不是隔壁工作区的 —— 那是有意的
+(策略和 Go 代码是同一套规则的两种表达,只有来自同一个 release 才会一致)。
+
+⚠️ 副作用是:**不带这个变量时,新规则不生效,而断言失败看起来完全像"CEL 写错了"**。
+踩过一次:新加的 `spec.tls` 校验断言报"was accepted",查了半天才发现跑的是旧策略。
+
+⭐ 反过来也要做一次:**改动发布成 tag 之后,不带 override 再跑一遍**。带 override 的绿
+只证明"我改的对",不证明"发出去的对"。
+
 ## ⚠️ 部署注意
 
 ### 装上策略之后,必须做一次存量修正 + 存量清理
