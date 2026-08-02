@@ -45,13 +45,37 @@ spec:
       expression: '"." + request.namespace.substring(0, 6) + ".TENANT_DOMAIN_SUFFIX"'
   validations:
     # 空 host 表示"匹配所有主机名",那等于把整个入口占了,必须拒。
+    #
+    # ⛔ `has(object.spec.rules)` 不是装饰。spec.rules 是**可选的** —— 只带
+    # defaultBackend 的 Ingress 完全合法 —— 而 CEL 读一个不存在的字段会**求值出错**,
+    # 加上 failurePolicy: Fail 就等于**拒绝**。实测:这样的 Ingress 一直被拒,
+    # 而且 `denied request:` 后面**什么都没有**,因为 messageExpression 也在同一个
+    # 缺失字段上炸掉了。租户看到的是一条没有任何内容的拒绝。
     - expression: >-
-        object.spec.rules.all(rule,
+        !has(object.spec.rules) || object.spec.rules.all(rule,
           has(rule.host) && rule.host != "" && rule.host.endsWith(variables.tenantSuffix))
       messageExpression: >-
         "an Ingress may only claim host names under this tenant's own subdomain (" +
         variables.tenantSuffix + "); a bare or foreign host name would take traffic from
         whoever else claims it, and the loser is told nothing"
+    # ⛔ spec.tls[].hosts is a SECOND list of host names, and it was not checked.
+    # It decides which names the ingress controller presents a certificate for --
+    # the SNI side of the same claim the rule above guards. Left open, a tenant
+    # could name someone else's domain there: the controller answers the TLS
+    # handshake for a name the tenant does not own, and where cert-manager or
+    # similar is wired in, a certificate may be requested for it.
+    #
+    # ⚠️ Both lists are optional and an empty one is ordinary, so this checks the
+    # entries rather than requiring any: no tls at all is fine (plain HTTP), and
+    # tls without hosts is fine too (it means "use the default certificate").
+    # Requiring them would refuse most Ingresses ever written.
+    - expression: >-
+        !has(object.spec.tls) || object.spec.tls.all(entry,
+          !has(entry.hosts) || entry.hosts.all(host, host.endsWith(variables.tenantSuffix)))
+      messageExpression: >-
+        "an Ingress may only list host names under this tenant's own subdomain (" +
+        variables.tenantSuffix + ") in spec.tls; naming another domain there makes the
+        ingress controller answer TLS for a name this tenant does not own"
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding
