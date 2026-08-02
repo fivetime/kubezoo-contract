@@ -32,6 +32,29 @@ const (
 
 	TenantQuotaNamePrefix = "kubezoo-tenant-quota"
 
+	// PodSecurityEnforceLabelKey and PodSecurityEnforceVersionLabelKey are
+	// Kubernetes' own keys; PodSecurityLevel and PodSecurityVersion are the
+	// values kubezoo pins on every tenant namespace.
+	//
+	// ⭐ Pinned in Go, not only by the Kyverno policy that also pins them, and
+	// the duplication is the point. Pod Security Admission runs INSIDE the
+	// apiserver -- no webhook, no single point -- so once a namespace carries
+	// this label the host-escape fields are refused even with every webhook in
+	// the cluster gone. But the label was put there by a Kyverno mutate, which
+	// means the second layer was installed by the first: a namespace created
+	// while Kyverno's webhook was not registered got no label and no enforcement
+	// at all. failurePolicy: Fail does not help -- it covers a webhook that
+	// fails, not one that was never registered, and the latter is the failure
+	// that actually happened (see docs/operations-cn.md in kubezoo-gateway).
+	//
+	// ⚠️ Kept honest by TestPolicyPinsTheSamePodSecurityLevel, which reads the
+	// policy YAML and compares. Two expressions of one rule only stay one rule
+	// if something checks.
+	PodSecurityEnforceLabelKey        = "pod-security.kubernetes.io/enforce"
+	PodSecurityEnforceVersionLabelKey = "pod-security.kubernetes.io/enforce-version"
+	PodSecurityLevel                  = "restricted"
+	PodSecurityVersion                = "latest"
+
 	// ProjectedClusterRoleBindingLabelKey marks the RoleBindings that carry a
 	// tenant's ClusterRoleBinding.
 	//
