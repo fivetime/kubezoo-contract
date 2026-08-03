@@ -57,7 +57,16 @@ const (
 	KubeZooClusterName = "kube-zoo"
 
 	RsaKeySize = 2048
-	// CertificateValidity defines the validity, i.e., 10 Years, for all the signed certificates.
+	// CertificateValidity is the fallback validity for a signed certificate: 10
+	// years.
+	//
+	// ⚠️ Long, and inherited rather than chosen. It stays the fallback only so
+	// that callers which do not set Config.Validity keep behaving as they did;
+	// anything issuing tenant credentials should be picking a number on purpose.
+	// A client certificate cannot be revoked, so its validity is the only bound
+	// there is on how long a credential keeps working after the platform would
+	// rather it did not. For comparison, kubeadm issues one year and the public
+	// CAs will not go past 398 days.
 	CertificateValidity = time.Hour * 24 * 365 * 10
 )
 
@@ -68,6 +77,9 @@ type Config struct {
 	OrganizationalUnit []string
 	AltNames           AltNames
 	Usages             []x509.ExtKeyUsage
+	// Validity is how long the certificate is good for. Zero or less means
+	// CertificateValidity.
+	Validity time.Duration
 }
 
 // AltNames contains the domain names and IP addresses that will be added
@@ -98,7 +110,8 @@ func EncodePrivateKeyPEM(key *rsa.PrivateKey) []byte {
 }
 
 // NewTenantCertAndKey creates new certificate and key for the denoted tenant.
-func NewTenantCertAndKey(caFile, caKeyFile, tenantID string) (*x509.Certificate, *rsa.PrivateKey, error) {
+// validity of zero or less means CertificateValidity.
+func NewTenantCertAndKey(caFile, caKeyFile, tenantID string, validity time.Duration) (*x509.Certificate, *rsa.PrivateKey, error) {
 	// load ca, ca-key from files
 	tlsCert, err := tls.LoadX509KeyPair(caFile, caKeyFile)
 	if err != nil {
@@ -118,6 +131,7 @@ func NewTenantCertAndKey(caFile, caKeyFile, tenantID string) (*x509.Certificate,
 		OrganizationalUnit: []string{tenantID},
 		CommonName:         tenantID + "-admin",
 		Usages:             []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
+		Validity:           validity,
 	}
 
 	return NewCertAndKey(cert, key, config)
@@ -160,6 +174,23 @@ func NewSignedCert(cfg *Config, key crypto.Signer, caCert *x509.Certificate, caK
 		return nil, errors.New("must specify a OrganizationalUnit")
 	}
 
+	// ⭐ How long this certificate lives is the caller's to choose, and it matters
+	// more here than the default suggests. A client certificate cannot be
+	// revoked: once handed over it is good until it expires, so its validity IS
+	// the platform's only bound on how long a withdrawn or disputed credential
+	// keeps working. Ten years is a default nobody chose, not a decision.
+	validity := cfg.Validity
+	if validity <= 0 {
+		validity = CertificateValidity
+	}
+	notAfter := time.Now().Add(validity).UTC()
+	// ⚠️ Never outlive the CA that signed it. A certificate whose NotAfter is
+	// past its issuer's is not valid for that extra time -- it just claims to be,
+	// and the failure lands on whoever trusted the claim, at a moment nobody
+	// planned for.
+	if notAfter.After(caCert.NotAfter) {
+		notAfter = caCert.NotAfter
+	}
 	certTmpl := x509.Certificate{
 		Subject: pkix.Name{
 			CommonName:         cfg.CommonName,
@@ -170,7 +201,7 @@ func NewSignedCert(cfg *Config, key crypto.Signer, caCert *x509.Certificate, caK
 		IPAddresses:  cfg.AltNames.IPs,
 		SerialNumber: serial,
 		NotBefore:    caCert.NotBefore,
-		NotAfter:     time.Now().Add(CertificateValidity).UTC(),
+		NotAfter:     notAfter,
 		KeyUsage:     x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
 		ExtKeyUsage:  cfg.Usages,
 	}

@@ -67,6 +67,22 @@ type TenantSpec struct {
 	// running. Absent means the tenant is operating normally.
 	// +optional
 	Suspension *TenantSuspension `json:"suspension,omitempty" protobuf:"bytes,3,opt,name=suspension"`
+	// CredentialValidity is how long a credential issued to this tenant is good
+	// for. Absent means the platform's default.
+	//
+	// ⭐ The tenant's choice, within a ceiling the platform sets. How often it
+	// wants to come back for a new credential is a question about the tenant's
+	// own operations -- how its CI is wired, how many people hold a kubeconfig,
+	// what its own policy says -- and the platform is not in a position to
+	// answer it. What the platform does get to say is "no longer than this".
+	//
+	// ⚠️ It is not only a convenience. A client certificate cannot be revoked, so
+	// this number is the entire bound on how long a credential keeps working
+	// after the platform would rather it stopped -- which makes a shorter
+	// validity the difference between "cannot cut a tenant off" and "cannot cut
+	// a tenant off for longer than this".
+	// +optional
+	CredentialValidity *metav1.Duration `json:"credentialValidity,omitempty" protobuf:"bytes,4,opt,name=credentialValidity"`
 }
 
 // TenantSuspensionMode selects how far a suspension goes.

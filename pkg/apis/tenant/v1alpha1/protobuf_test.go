@@ -17,10 +17,13 @@ limitations under the License.
 package v1alpha1
 
 import (
+	"reflect"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // TestProtobufRoundTripKeepsEveryField guards the quietest failure this API can
@@ -47,7 +50,21 @@ func TestProtobufRoundTripKeepsEveryField(t *testing.T) {
 				Mode:   SuspensionReadOnly,
 				Reason: "unpaid invoice",
 			},
+			CredentialValidity: &metav1.Duration{Duration: 90 * 24 * time.Hour},
 		},
+	}
+
+	// ⭐ Every field must be POPULATED, checked by reflection rather than by
+	// whoever is reading this remembering to. The round trip below can only
+	// notice a field it was given a value for, so a test that hand-lists the
+	// fields quietly stops covering the API the moment someone adds one -- which
+	// is the exact failure this file exists to catch, one level up.
+	spec := reflect.ValueOf(in.Spec)
+	for i := 0; i < spec.NumField(); i++ {
+		if spec.Field(i).IsZero() {
+			t.Fatalf("TenantSpec.%s is not populated by this test, so the round trip below says "+
+				"nothing about it. Give it a non-zero value.", spec.Type().Field(i).Name)
+		}
 	}
 
 	data, err := in.Marshal()
@@ -73,5 +90,16 @@ func TestProtobufRoundTripKeepsEveryField(t *testing.T) {
 	if out.Spec.Suspension.Mode != in.Spec.Suspension.Mode ||
 		out.Spec.Suspension.Reason != in.Spec.Suspension.Reason {
 		t.Errorf("suspension = %+v, want %+v", out.Spec.Suspension, in.Spec.Suspension)
+	}
+	if out.Spec.CredentialValidity == nil {
+		t.Fatal("credentialValidity did not survive the round trip, so a tenant that asked for a " +
+			"short-lived credential would be stored as one that asked for nothing and issued the " +
+			"platform default -- run 'make codegen' after changing this package")
+	}
+
+	// The catch-all. Named fields above say what breaks and why; this says that
+	// nothing ELSE was lost, including whatever is added next.
+	if !reflect.DeepEqual(in.Spec, out.Spec) {
+		t.Errorf("spec did not survive the round trip:\n got %+v\nwant %+v", out.Spec, in.Spec)
 	}
 }

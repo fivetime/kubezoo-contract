@@ -475,12 +475,18 @@ func schema_pkg_apis_tenant_v1alpha1_TenantSpec(ref common.ReferenceCallback) co
 							Ref:         ref("github.com/fivetime/kubezoo-contract/pkg/apis/tenant/v1alpha1.TenantSuspension"),
 						},
 					},
+					"credentialValidity": {
+						SchemaProps: spec.SchemaProps{
+							Description: "CredentialValidity is how long a credential issued to this tenant is good for. Absent means the platform's default.\n\n⭐ The tenant's choice, within a ceiling the platform sets. How often it wants to come back for a new credential is a question about the tenant's own operations -- how its CI is wired, how many people hold a kubeconfig, what its own policy says -- and the platform is not in a position to answer it. What the platform does get to say is \"no longer than this\".\n\n⚠️ It is not only a convenience. A client certificate cannot be revoked, so this number is the entire bound on how long a credential keeps working after the platform would rather it stopped -- which makes a shorter validity the difference between \"cannot cut a tenant off\" and \"cannot cut a tenant off for longer than this\".",
+							Ref:         ref(v1.Duration{}.OpenAPIModelName()),
+						},
+					},
 				},
 				Required: []string{"id", "quota"},
 			},
 		},
 		Dependencies: []string{
-			"github.com/fivetime/kubezoo-contract/pkg/apis/tenant/v1alpha1.TenantQuota", "github.com/fivetime/kubezoo-contract/pkg/apis/tenant/v1alpha1.TenantSuspension"},
+			"github.com/fivetime/kubezoo-contract/pkg/apis/tenant/v1alpha1.TenantQuota", "github.com/fivetime/kubezoo-contract/pkg/apis/tenant/v1alpha1.TenantSuspension", v1.Duration{}.OpenAPIModelName()},
 	}
 }
 

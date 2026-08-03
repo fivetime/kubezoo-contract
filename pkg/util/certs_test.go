@@ -127,7 +127,7 @@ func TestNewTenantCertAndKey(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			gotCa, gotKey, gotErr := NewTenantCertAndKey(test.caFile, test.caKeyFile, tenantId)
+			gotCa, gotKey, gotErr := NewTenantCertAndKey(test.caFile, test.caKeyFile, tenantId, 0)
 			if test.expectedErrorNil && gotErr != nil {
 				t.Errorf("expect nil error, got %s", gotErr)
 				return

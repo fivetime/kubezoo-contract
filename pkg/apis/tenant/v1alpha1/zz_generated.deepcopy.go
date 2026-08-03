@@ -23,6 +23,7 @@ package v1alpha1
 
 import (
 	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	runtime "k8s.io/apimachinery/pkg/runtime"
 )
 
@@ -117,6 +118,11 @@ func (in *TenantSpec) DeepCopyInto(out *TenantSpec) {
 	if in.Suspension != nil {
 		in, out := &in.Suspension, &out.Suspension
 		*out = new(TenantSuspension)
+		**out = **in
+	}
+	if in.CredentialValidity != nil {
+		in, out := &in.CredentialValidity, &out.CredentialValidity
+		*out = new(metav1.Duration)
 		**out = **in
 	}
 	return

@@ -26,7 +26,9 @@ import (
 	"sort"
 
 	k8s_io_api_core_v1 "k8s.io/api/core/v1"
+
 	"k8s.io/apimachinery/pkg/api/resource"
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	math_bits "math/bits"
 	reflect "reflect"
@@ -217,6 +219,18 @@ func (m *TenantSpec) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	_ = i
 	var l int
 	_ = l
+	if m.CredentialValidity != nil {
+		{
+			size, err := m.CredentialValidity.MarshalToSizedBuffer(dAtA[:i])
+			if err != nil {
+				return 0, err
+			}
+			i -= size
+			i = encodeVarintGenerated(dAtA, i, uint64(size))
+		}
+		i--
+		dAtA[i] = 0x22
+	}
 	if m.Suspension != nil {
 		{
 			size, err := m.Suspension.MarshalToSizedBuffer(dAtA[:i])
@@ -383,6 +397,10 @@ func (m *TenantSpec) Size() (n int) {
 		l = m.Suspension.Size()
 		n += 1 + l + sovGenerated(uint64(l))
 	}
+	if m.CredentialValidity != nil {
+		l = m.CredentialValidity.Size()
+		n += 1 + l + sovGenerated(uint64(l))
+	}
 	return n
 }
 
@@ -471,6 +489,7 @@ func (this *TenantSpec) String() string {
 		`ID:` + fmt.Sprintf("%v", this.ID) + `,`,
 		`Quota:` + strings.Replace(strings.Replace(this.Quota.String(), "TenantQuota", "TenantQuota", 1), `&`, ``, 1) + `,`,
 		`Suspension:` + strings.Replace(this.Suspension.String(), "TenantSuspension", "TenantSuspension", 1) + `,`,
+		`CredentialValidity:` + strings.Replace(fmt.Sprintf("%v", this.CredentialValidity), "Duration", "v1.Duration", 1) + `,`,
 		`}`,
 	}, "")
 	return s
@@ -1063,6 +1082,42 @@ func (m *TenantSpec) Unmarshal(dAtA []byte) error {
 				m.Suspension = &TenantSuspension{}
 			}
 			if err := m.Suspension.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		case 4:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field CredentialValidity", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			if m.CredentialValidity == nil {
+				m.CredentialValidity = &v1.Duration{}
+			}
+			if err := m.CredentialValidity.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
 				return err
 			}
 			iNdEx = postIndex
