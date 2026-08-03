@@ -53,6 +53,20 @@ const (
 	// timing where it belongs, with whoever wants the credential, rather than
 	// having the platform rotate on the tenant's behalf.
 	AnnotationTenantCredentialIssuedAt = "kubezoo.io/tenant.credential-issued-at"
+	// AnnotationTenantCredentialExpiresAt records when the credential last issued
+	// to a tenant stops working, in RFC3339.
+	//
+	// ⭐ Written down because otherwise it cannot be seen. The certificate carries
+	// its own NotAfter, but reading it means base64-decoding an annotation and
+	// running openssl over the result -- so in practice the first anyone hears of
+	// an expired credential is a 401 from CI on a morning nobody picked. A
+	// shorter validity is only workable if expiry is a routine, visible event
+	// rather than a surprise, and this is what makes it visible.
+	//
+	// ⚠️ Kept when the stored kubeconfig is withdrawn. Which credential a tenant
+	// holds is not knowable from the platform side once the copy is gone, so this
+	// is the only remaining answer to "when does theirs stop working".
+	AnnotationTenantCredentialExpiresAt = "kubezoo.io/tenant.credential-expires-at"
 
 	KubeZooClusterName = "kube-zoo"
 
