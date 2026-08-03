@@ -53,7 +53,7 @@ VERIFY=false
 [[ "${1:-}" == "--verify" ]] && VERIFY=true
 
 # Targets to run, in order. Override with TARGETS="deepcopy openapi".
-TARGETS="${TARGETS:-deepcopy defaulter register protobuf openapi client}"
+TARGETS="${TARGETS:-deepcopy defaulter register protobuf openapi client crd}"
 
 # ---------------------------------------------------------------------------
 # The APIs this repository owns.
@@ -102,6 +102,27 @@ mod_version() {
 # the 1.36 move ended up running 1.24-era generators against 1.36 types: they
 # take a different command line, so the recipe silently stopped matching the
 # toolchain it claimed to follow.
+# install_pinned installs a tool whose version is pinned HERE rather than derived
+# from go.mod.
+#
+# ⭐ For build-time tools that are not code dependencies. controller-gen is the
+# case: adding it with `go get -tool` writes a tool directive plus a dozen
+# `// indirect` requires into go.mod, and this module is consumed by two others
+# BY TAG -- so those indirect requires propagate into their module graphs and
+# quietly bump their dependencies. Measured: it upgraded go-colorable and
+# go-isatty and pulled in cobra, flect and golang.org/x/tools. A library module
+# should not carry that for a generator nothing imports.
+install_pinned() {
+  local bin="$1" pkg="$2" version="$3"
+  local stamped="${BIN_DIR}/${bin}-${version}"
+  if [[ ! -x "${stamped}" ]]; then
+    echo "  installing ${bin} ${version}"
+    GOBIN="${BIN_DIR}" go install "${pkg}@${version}"
+    mv "${BIN_DIR}/${bin}" "${stamped}"
+  fi
+  ln -sf "$(basename "${stamped}")" "${BIN_DIR}/${bin}"
+}
+
 install_gen() {
   local bin="$1" pkg="$2" module="$3"
   local version stamped
@@ -283,11 +304,48 @@ run_client() {
     "${OWNED_APIS[@]}"
 }
 
+# CONTROLLER_GEN_VERSION is pinned here, not in go.mod. See install_pinned.
+CONTROLLER_GEN_VERSION="v0.19.0"
+
+# run_crd generates the CustomResourceDefinitions for the owned API types.
+#
+# ⛔ This target did not exist, and the consequence was not a stale file but a
+# feature that had never worked. ClusterResourceQuota carries
+# +kubebuilder:resource:scope=Cluster and the deployment manifests install a
+# controller and a webhook for it -- but no CRD was ever generated or applied, so
+# the upstream cluster never served quota.kubezoo.io, the tenant controller's
+# discovery check returned nil, and NO TENANT QUOTA WAS EVER ENFORCED in any
+# deployment path. Confirmed against a live cluster: applying the generated CRD
+# made the skip disappear and the ClusterResourceQuota appear.
+#
+# ⚠️ Which is why the note that used to sit here -- "stable as long as the owned
+# API types do not change, add it when it next needs to move" -- was wrong in a
+# way worth remembering. It reasoned about DRIFT, as if the file existed and
+# might go stale. Nothing checked that it existed at all.
+# ⚠️ TWO files come out and only ONE is meant to be applied.
+#
+#   quota.kubezoo.io_clusterresourcequotas.yaml  -- APPLY IT. The upstream cluster
+#       has to serve this type; nothing else does.
+#   tenant.kubezoo.io_tenants.yaml               -- DO NOT apply it. kubezoo serves
+#       tenant.kubezoo.io itself, as a built-in API. Verified:
+#       `kubectl api-resources --api-group=tenant.kubezoo.io` against kubezoo lists
+#       tenants, and the upstream cluster has no such CRD and needs none.
+#
+# controller-gen cannot tell the difference -- it emits one file per type carrying
+# kubebuilder markers, and both types carry them. Installing the Tenant CRD
+# upstream would create a second, empty home for a type that already has one.
+run_crd() {
+  install_pinned controller-gen sigs.k8s.io/controller-tools/cmd/controller-gen \
+    "${CONTROLLER_GEN_VERSION}"
+  run_quiet "${BIN_DIR}/controller-gen" \
+    crd \
+    paths=./pkg/apis/... \
+    output:crd:dir="${WORK_ROOT}/config/crd"
+}
+
 # ---------------------------------------------------------------------------
 # Not covered here, and still without a recipe:
-#   crd       pkg/apis/*/zz.generated.crd.go               (needs controller-gen)
-# Stable as long as the owned API types do not change. Add it when it next needs
-# to move.
+#   (nothing)
 #
 # ⚠️ This block used to name protobuf as the uncovered one. It has had a recipe
 # for some time -- run_protobuf above, and "protobuf" is in the default TARGETS.
@@ -316,6 +374,7 @@ for target in ${TARGETS}; do
     protobuf)       run_protobuf ;;
     openapi)        run_openapi ;;
     client)         run_client ;;
+    crd)            run_crd ;;
     *) echo "unknown target: ${target}" >&2; exit 1 ;;
   esac
 done
