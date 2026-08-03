@@ -17,11 +17,15 @@ limitations under the License.
 package util
 
 import (
+	cryptorand "crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
+	"crypto/x509/pkix"
 	"io/ioutil"
+	"math/big"
 	"os"
 	"testing"
+	"time"
 
 	"k8s.io/client-go/util/keyutil"
 )
@@ -152,4 +156,102 @@ func TestNewTenantCertAndKey(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestSignedCertValidity pins how long an issued certificate lives, and that it
+// never claims to outlive the CA that signed it.
+//
+// ⭐ Validity is not cosmetic here. A client certificate cannot be revoked, so
+// how long it is good for is the only bound there is on how long a credential
+// keeps working after the platform would rather it stopped.
+//
+// ⚠️ The CA clamp had no test when it was written, and the lab could not have
+// caught it either: the lab's CA lives five years, so nothing there ever issues
+// a certificate long enough to hit the ceiling. This is the only place the case
+// exists.
+func TestSignedCertValidity(t *testing.T) {
+	caKey, err := NewPrivateKey()
+	if err != nil {
+		t.Fatalf("generating a CA key: %v", err)
+	}
+	// A CA with a deliberately short life, which is the situation the clamp is
+	// for: an issuer closer to its own expiry than the certificates it is being
+	// asked to sign.
+	caTmpl := &x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: "test-ca"},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(30 * 24 * time.Hour),
+		IsCA:                  true,
+		KeyUsage:              x509.KeyUsageCertSign,
+		BasicConstraintsValid: true,
+	}
+	der, err := x509.CreateCertificate(cryptorand.Reader, caTmpl, caTmpl, caKey.Public(), caKey)
+	if err != nil {
+		t.Fatalf("self-signing the CA: %v", err)
+	}
+	caCert, err := x509.ParseCertificate(der)
+	if err != nil {
+		t.Fatalf("parsing the CA: %v", err)
+	}
+
+	config := func(validity time.Duration) *Config {
+		return &Config{
+			CommonName:         "111111-admin",
+			OrganizationalUnit: []string{"111111"},
+			Usages:             []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
+			Validity:           validity,
+		}
+	}
+
+	t.Run("honours the requested validity", func(t *testing.T) {
+		key, err := NewPrivateKey()
+		if err != nil {
+			t.Fatalf("generating a key: %v", err)
+		}
+		cert, err := NewSignedCert(config(7*24*time.Hour), key, caCert, caKey)
+		if err != nil {
+			t.Fatalf("signing: %v", err)
+		}
+		want := time.Now().Add(7 * 24 * time.Hour)
+		if cert.NotAfter.Sub(want) > time.Minute || want.Sub(cert.NotAfter) > time.Minute {
+			t.Errorf("notAfter = %s, want about %s", cert.NotAfter, want)
+		}
+	})
+
+	t.Run("clamps to the CA rather than outliving it", func(t *testing.T) {
+		key, err := NewPrivateKey()
+		if err != nil {
+			t.Fatalf("generating a key: %v", err)
+		}
+		// Ten years against a CA with thirty days left.
+		cert, err := NewSignedCert(config(10*365*24*time.Hour), key, caCert, caKey)
+		if err != nil {
+			t.Fatalf("signing: %v", err)
+		}
+		if cert.NotAfter.After(caCert.NotAfter) {
+			t.Errorf("notAfter = %s, past the CA's %s. The certificate is not actually valid for "+
+				"that extra time -- it only says it is, and whoever trusted the claim finds out "+
+				"at a moment nobody planned for", cert.NotAfter, caCert.NotAfter)
+		}
+		if !cert.NotAfter.Equal(caCert.NotAfter) {
+			t.Errorf("notAfter = %s, want the CA's own %s", cert.NotAfter, caCert.NotAfter)
+		}
+	})
+
+	t.Run("zero validity falls back to the default", func(t *testing.T) {
+		key, err := NewPrivateKey()
+		if err != nil {
+			t.Fatalf("generating a key: %v", err)
+		}
+		cert, err := NewSignedCert(config(0), key, caCert, caKey)
+		if err != nil {
+			t.Fatalf("signing: %v", err)
+		}
+		// The default is ten years, so against this CA it clamps -- which is the
+		// point: a caller that sets nothing still cannot outlive the issuer.
+		if !cert.NotAfter.Equal(caCert.NotAfter) {
+			t.Errorf("notAfter = %s, want the CA's own %s", cert.NotAfter, caCert.NotAfter)
+		}
+	})
 }
