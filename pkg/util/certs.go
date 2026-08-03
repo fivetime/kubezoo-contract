@@ -35,7 +35,26 @@ import (
 
 const (
 	AnnotationTenantKubeConfigBase64 = "kubezoo.io/tenant.kubeconfig.base64"
-	KubeZooClusterName               = "kube-zoo"
+	// AnnotationTenantCredentialIssuedAt records when a tenant was last issued
+	// credentials, in RFC3339.
+	//
+	// ⭐ It is what makes "issued once, not kept" expressible at all. The
+	// kubeconfig annotation carries the tenant's PRIVATE KEY, and the platform
+	// has no reason to hold a copy of every tenant's key forever -- one read of
+	// one object would be all of them. But an annotation that has simply been
+	// deleted cannot be told apart from one that was never written, so a
+	// controller that cleared it would reissue on the next reconcile and the key
+	// would be straight back.
+	//
+	// With this marker the three states are distinct: nothing issued yet
+	// (neither annotation present), issued and still being collected (both), and
+	// issued then withdrawn (only this one). Removing this annotation is
+	// therefore the gesture that asks for a new credential -- which puts the
+	// timing where it belongs, with whoever wants the credential, rather than
+	// having the platform rotate on the tenant's behalf.
+	AnnotationTenantCredentialIssuedAt = "kubezoo.io/tenant.credential-issued-at"
+
+	KubeZooClusterName = "kube-zoo"
 
 	RsaKeySize = 2048
 	// CertificateValidity defines the validity, i.e., 10 Years, for all the signed certificates.
