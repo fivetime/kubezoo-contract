@@ -37,6 +37,8 @@ import (
 
 func (m *Tenant) Reset() { *m = Tenant{} }
 
+func (m *TenantCapacity) Reset() { *m = TenantCapacity{} }
+
 func (m *TenantList) Reset() { *m = TenantList{} }
 
 func (m *TenantQuota) Reset() { *m = TenantQuota{} }
@@ -97,6 +99,44 @@ func (m *Tenant) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	}
 	i--
 	dAtA[i] = 0xa
+	return len(dAtA) - i, nil
+}
+
+func (m *TenantCapacity) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *TenantCapacity) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *TenantCapacity) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.MaxCRDs != nil {
+		i = encodeVarintGenerated(dAtA, i, uint64(*m.MaxCRDs))
+		i--
+		dAtA[i] = 0x18
+	}
+	if m.MaxClusterRoleBindings != nil {
+		i = encodeVarintGenerated(dAtA, i, uint64(*m.MaxClusterRoleBindings))
+		i--
+		dAtA[i] = 0x10
+	}
+	if m.MaxNamespaces != nil {
+		i = encodeVarintGenerated(dAtA, i, uint64(*m.MaxNamespaces))
+		i--
+		dAtA[i] = 0x8
+	}
 	return len(dAtA) - i, nil
 }
 
@@ -219,6 +259,18 @@ func (m *TenantSpec) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	_ = i
 	var l int
 	_ = l
+	if m.Capacity != nil {
+		{
+			size, err := m.Capacity.MarshalToSizedBuffer(dAtA[:i])
+			if err != nil {
+				return 0, err
+			}
+			i -= size
+			i = encodeVarintGenerated(dAtA, i, uint64(size))
+		}
+		i--
+		dAtA[i] = 0x2a
+	}
 	if m.CredentialValidity != nil {
 		{
 			size, err := m.CredentialValidity.MarshalToSizedBuffer(dAtA[:i])
@@ -349,6 +401,24 @@ func (m *Tenant) Size() (n int) {
 	return n
 }
 
+func (m *TenantCapacity) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	if m.MaxNamespaces != nil {
+		n += 1 + sovGenerated(uint64(*m.MaxNamespaces))
+	}
+	if m.MaxClusterRoleBindings != nil {
+		n += 1 + sovGenerated(uint64(*m.MaxClusterRoleBindings))
+	}
+	if m.MaxCRDs != nil {
+		n += 1 + sovGenerated(uint64(*m.MaxCRDs))
+	}
+	return n
+}
+
 func (m *TenantList) Size() (n int) {
 	if m == nil {
 		return 0
@@ -401,6 +471,10 @@ func (m *TenantSpec) Size() (n int) {
 		l = m.CredentialValidity.Size()
 		n += 1 + l + sovGenerated(uint64(l))
 	}
+	if m.Capacity != nil {
+		l = m.Capacity.Size()
+		n += 1 + l + sovGenerated(uint64(l))
+	}
 	return n
 }
 
@@ -441,6 +515,18 @@ func (this *Tenant) String() string {
 		`ObjectMeta:` + strings.Replace(strings.Replace(fmt.Sprintf("%v", this.ObjectMeta), "ObjectMeta", "v1.ObjectMeta", 1), `&`, ``, 1) + `,`,
 		`Spec:` + strings.Replace(strings.Replace(this.Spec.String(), "TenantSpec", "TenantSpec", 1), `&`, ``, 1) + `,`,
 		`Status:` + strings.Replace(strings.Replace(this.Status.String(), "TenantStatus", "TenantStatus", 1), `&`, ``, 1) + `,`,
+		`}`,
+	}, "")
+	return s
+}
+func (this *TenantCapacity) String() string {
+	if this == nil {
+		return "nil"
+	}
+	s := strings.Join([]string{`&TenantCapacity{`,
+		`MaxNamespaces:` + valueToStringGenerated(this.MaxNamespaces) + `,`,
+		`MaxClusterRoleBindings:` + valueToStringGenerated(this.MaxClusterRoleBindings) + `,`,
+		`MaxCRDs:` + valueToStringGenerated(this.MaxCRDs) + `,`,
 		`}`,
 	}, "")
 	return s
@@ -490,6 +576,7 @@ func (this *TenantSpec) String() string {
 		`Quota:` + strings.Replace(strings.Replace(this.Quota.String(), "TenantQuota", "TenantQuota", 1), `&`, ``, 1) + `,`,
 		`Suspension:` + strings.Replace(this.Suspension.String(), "TenantSuspension", "TenantSuspension", 1) + `,`,
 		`CredentialValidity:` + strings.Replace(fmt.Sprintf("%v", this.CredentialValidity), "Duration", "v1.Duration", 1) + `,`,
+		`Capacity:` + strings.Replace(this.Capacity.String(), "TenantCapacity", "TenantCapacity", 1) + `,`,
 		`}`,
 	}, "")
 	return s
@@ -651,6 +738,116 @@ func (m *Tenant) Unmarshal(dAtA []byte) error {
 				return err
 			}
 			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := skipGenerated(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *TenantCapacity) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowGenerated
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: TenantCapacity: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: TenantCapacity: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field MaxNamespaces", wireType)
+			}
+			var v int32
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				v |= int32(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			m.MaxNamespaces = &v
+		case 2:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field MaxClusterRoleBindings", wireType)
+			}
+			var v int32
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				v |= int32(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			m.MaxClusterRoleBindings = &v
+		case 3:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field MaxCRDs", wireType)
+			}
+			var v int32
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				v |= int32(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			m.MaxCRDs = &v
 		default:
 			iNdEx = preIndex
 			skippy, err := skipGenerated(dAtA[iNdEx:])
@@ -1118,6 +1315,42 @@ func (m *TenantSpec) Unmarshal(dAtA []byte) error {
 				m.CredentialValidity = &v1.Duration{}
 			}
 			if err := m.CredentialValidity.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		case 5:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Capacity", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			if m.Capacity == nil {
+				m.Capacity = &TenantCapacity{}
+			}
+			if err := m.Capacity.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
 				return err
 			}
 			iNdEx = postIndex

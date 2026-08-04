@@ -51,6 +51,11 @@ func TestProtobufRoundTripKeepsEveryField(t *testing.T) {
 				Reason: "unpaid invoice",
 			},
 			CredentialValidity: &metav1.Duration{Duration: 90 * 24 * time.Hour},
+			Capacity: &TenantCapacity{
+				MaxNamespaces:          ptr(int32(16)),
+				MaxClusterRoleBindings: ptr(int32(24)),
+				MaxCRDs:                ptr(int32(6)),
+			},
 		},
 	}
 
@@ -91,6 +96,11 @@ func TestProtobufRoundTripKeepsEveryField(t *testing.T) {
 		out.Spec.Suspension.Reason != in.Spec.Suspension.Reason {
 		t.Errorf("suspension = %+v, want %+v", out.Spec.Suspension, in.Spec.Suspension)
 	}
+	if out.Spec.Capacity == nil || out.Spec.Capacity.MaxCRDs == nil {
+		t.Fatal("capacity did not survive the round trip, so a tenant given a raised limit would be " +
+			"stored with the platform default and refused at the old one -- run 'make codegen' " +
+			"after changing this package")
+	}
 	if out.Spec.CredentialValidity == nil {
 		t.Fatal("credentialValidity did not survive the round trip, so a tenant that asked for a " +
 			"short-lived credential would be stored as one that asked for nothing and issued the " +
@@ -103,3 +113,5 @@ func TestProtobufRoundTripKeepsEveryField(t *testing.T) {
 		t.Errorf("spec did not survive the round trip:\n got %+v\nwant %+v", out.Spec, in.Spec)
 	}
 }
+
+func ptr[T any](v T) *T { return &v }

@@ -83,6 +83,46 @@ type TenantSpec struct {
 	// a tenant off for longer than this".
 	// +optional
 	CredentialValidity *metav1.Duration `json:"credentialValidity,omitempty" protobuf:"bytes,4,opt,name=credentialValidity"`
+	// Capacity is how much of the shared cluster this tenant may take. Absent
+	// fields mean the platform's default.
+	// +optional
+	Capacity *TenantCapacity `json:"capacity,omitempty" protobuf:"bytes,5,opt,name=capacity"`
+}
+
+// TenantCapacity caps the cluster-scoped objects one tenant may own.
+//
+// ⛔ ON THE OBJECT, NOT ON A FLAG, and the difference is operational rather than
+// stylistic. Capacity is per tenant, so a flag makes raising ONE tenant's limit a
+// restart of the gateway -- which is a single-replica StatefulSet, so that
+// restart is every tenant's API interrupted and every tenant's operator watches
+// broken, to change one number for one of them. The same reasoning is already
+// written down for published storage classes, which moved from flags to labels
+// for exactly this.
+//
+// ⚠️ Set by the PLATFORM, not by the tenant. A tenant cannot write Tenant
+// objects at all -- pkg/filters/platformapi.go refuses the whole group to any
+// identity carrying a tenant id -- so this is safe to keep beside the fields a
+// tenant does choose, like CredentialValidity.
+//
+// ⭐ These are ceilings on AMPLIFIERS, not billing. A cross-namespace list reads
+// each of the tenant's namespaces in turn; one ClusterRoleBinding becomes one
+// RoleBinding in every namespace it owns; every CRD it creates enters the
+// upstream cluster's discovery document and OpenAPI, which every client of that
+// cluster downloads. The cost of each lands on the other tenants.
+type TenantCapacity struct {
+	// MaxNamespaces caps how many namespaces the tenant may own. Zero means no
+	// limit; absent means the platform default.
+	// +optional
+	MaxNamespaces *int32 `json:"maxNamespaces,omitempty" protobuf:"varint,1,opt,name=maxNamespaces"`
+	// MaxClusterRoleBindings caps how many the tenant may own. ⚠️ Multiplies with
+	// MaxNamespaces: each binding is projected into every namespace.
+	// +optional
+	MaxClusterRoleBindings *int32 `json:"maxClusterRoleBindings,omitempty" protobuf:"varint,2,opt,name=maxClusterRoleBindings"`
+	// MaxCRDs caps how many CustomResourceDefinitions the tenant may own.
+	// ⭐ The heaviest of the three: namespaces and bindings cost per request,
+	// a CRD costs continuously whether the tenant uses it again or not.
+	// +optional
+	MaxCRDs *int32 `json:"maxCRDs,omitempty" protobuf:"varint,3,opt,name=maxCRDs"`
 }
 
 // TenantSuspensionMode selects how far a suspension goes.

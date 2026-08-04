@@ -38,6 +38,7 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		"github.com/fivetime/kubezoo-contract/pkg/apis/quota/v1alpha1.ClusterResourceQuotaSpec":   schema_pkg_apis_quota_v1alpha1_ClusterResourceQuotaSpec(ref),
 		"github.com/fivetime/kubezoo-contract/pkg/apis/quota/v1alpha1.ClusterResourceQuotaStatus": schema_pkg_apis_quota_v1alpha1_ClusterResourceQuotaStatus(ref),
 		"github.com/fivetime/kubezoo-contract/pkg/apis/tenant/v1alpha1.Tenant":                    schema_pkg_apis_tenant_v1alpha1_Tenant(ref),
+		"github.com/fivetime/kubezoo-contract/pkg/apis/tenant/v1alpha1.TenantCapacity":            schema_pkg_apis_tenant_v1alpha1_TenantCapacity(ref),
 		"github.com/fivetime/kubezoo-contract/pkg/apis/tenant/v1alpha1.TenantList":                schema_pkg_apis_tenant_v1alpha1_TenantList(ref),
 		"github.com/fivetime/kubezoo-contract/pkg/apis/tenant/v1alpha1.TenantQuota":               schema_pkg_apis_tenant_v1alpha1_TenantQuota(ref),
 		"github.com/fivetime/kubezoo-contract/pkg/apis/tenant/v1alpha1.TenantSpec":                schema_pkg_apis_tenant_v1alpha1_TenantSpec(ref),
@@ -365,6 +366,40 @@ func schema_pkg_apis_tenant_v1alpha1_Tenant(ref common.ReferenceCallback) common
 	}
 }
 
+func schema_pkg_apis_tenant_v1alpha1_TenantCapacity(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "TenantCapacity caps the cluster-scoped objects one tenant may own.\n\n⛔ ON THE OBJECT, NOT ON A FLAG, and the difference is operational rather than stylistic. Capacity is per tenant, so a flag makes raising ONE tenant's limit a restart of the gateway -- which is a single-replica StatefulSet, so that restart is every tenant's API interrupted and every tenant's operator watches broken, to change one number for one of them. The same reasoning is already written down for published storage classes, which moved from flags to labels for exactly this.\n\n⚠️ Set by the PLATFORM, not by the tenant. A tenant cannot write Tenant objects at all -- pkg/filters/platformapi.go refuses the whole group to any identity carrying a tenant id -- so this is safe to keep beside the fields a tenant does choose, like CredentialValidity.\n\n⭐ These are ceilings on AMPLIFIERS, not billing. A cross-namespace list reads each of the tenant's namespaces in turn; one ClusterRoleBinding becomes one RoleBinding in every namespace it owns; every CRD it creates enters the upstream cluster's discovery document and OpenAPI, which every client of that cluster downloads. The cost of each lands on the other tenants.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"maxNamespaces": {
+						SchemaProps: spec.SchemaProps{
+							Description: "MaxNamespaces caps how many namespaces the tenant may own. Zero means no limit; absent means the platform default.",
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"maxClusterRoleBindings": {
+						SchemaProps: spec.SchemaProps{
+							Description: "MaxClusterRoleBindings caps how many the tenant may own. ⚠️ Multiplies with MaxNamespaces: each binding is projected into every namespace.",
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"maxCRDs": {
+						SchemaProps: spec.SchemaProps{
+							Description: "MaxCRDs caps how many CustomResourceDefinitions the tenant may own. ⭐ The heaviest of the three: namespaces and bindings cost per request, a CRD costs continuously whether the tenant uses it again or not.",
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
 func schema_pkg_apis_tenant_v1alpha1_TenantList(ref common.ReferenceCallback) common.OpenAPIDefinition {
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
@@ -481,12 +516,18 @@ func schema_pkg_apis_tenant_v1alpha1_TenantSpec(ref common.ReferenceCallback) co
 							Ref:         ref(v1.Duration{}.OpenAPIModelName()),
 						},
 					},
+					"capacity": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Capacity is how much of the shared cluster this tenant may take. Absent fields mean the platform's default.",
+							Ref:         ref("github.com/fivetime/kubezoo-contract/pkg/apis/tenant/v1alpha1.TenantCapacity"),
+						},
+					},
 				},
 				Required: []string{"id", "quota"},
 			},
 		},
 		Dependencies: []string{
-			"github.com/fivetime/kubezoo-contract/pkg/apis/tenant/v1alpha1.TenantQuota", "github.com/fivetime/kubezoo-contract/pkg/apis/tenant/v1alpha1.TenantSuspension", v1.Duration{}.OpenAPIModelName()},
+			"github.com/fivetime/kubezoo-contract/pkg/apis/tenant/v1alpha1.TenantCapacity", "github.com/fivetime/kubezoo-contract/pkg/apis/tenant/v1alpha1.TenantQuota", "github.com/fivetime/kubezoo-contract/pkg/apis/tenant/v1alpha1.TenantSuspension", v1.Duration{}.OpenAPIModelName()},
 	}
 }
 
