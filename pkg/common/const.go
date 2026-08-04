@@ -118,6 +118,20 @@ const (
 	// existing pass-through behaviour to stay compatible with.
 	DeviceClassPublishedLabelKey = "deviceclass.kubezoo.io/published"
 
+	// VolumeSnapshotClassPublishedLabelKey marks a VolumeSnapshotClass a tenant
+	// may name when it takes a snapshot.
+	//
+	// ⭐ The fifth of these, and the first on a CUSTOM RESOURCE -- the class is
+	// defined by the platform's snapshot CRDs, not by Kubernetes. The label works
+	// the same way because publication is about the object, not about who defined
+	// its type.
+	//
+	// A class names the driver, the deletion policy and the parameters, which
+	// include which of the platform's secrets the snapshotter uses. That makes it
+	// a tier a platform sells, like a VolumeAttributesClass -- so nothing is
+	// published by default.
+	VolumeSnapshotClassPublishedLabelKey = "volumesnapshotclass.kubezoo.io/published"
+
 	// PublishedTrue means tenants may see the class and use it for new objects.
 	PublishedTrue = "true"
 	// PublishedDeprecated means tenants may still SEE the class -- so that an
