@@ -169,7 +169,21 @@ func TestTenantSAGroupIsPerServiceAccount(t *testing.T) {
 	c := TenantSAGroup("909090", "909090-other-ns", "cainjector")
 	d := TenantSAGroup("111111", "111111-default", "cainjector")
 
-	// ⭐⭐ The two callers must land on the same name. kubezoo builds it from a
+	// ⭐⭐ EITHER convention lands on the same name, and this is what the
+	// normalisation inside TenantSAGroup buys. The bug it fixes was two callers
+	// disagreeing about whether the namespace carries the tenant prefix; making
+	// them both pass the upstream form fixed that instance, and this makes the
+	// whole class impossible -- a caller that passes the tenant's own name for
+	// the namespace gets the same group as one that passes upstream's.
+	//
+	// ⚠️ Without it the first version of this test could not fail: both inputs
+	// had been made identical, so deleting the normalisation changed nothing.
+	if trimmed, upstream := TenantSAGroup("909090", "default", "cainjector"), a; trimmed != upstream {
+		t.Errorf("the group is %q from the tenant's namespace name and %q from upstream's; "+
+			"a caller picking the other convention writes a grant nobody asserts", trimmed, upstream)
+	}
+
+	// The two callers must land on the same name. kubezoo builds it from a
 	// ServiceAccount's username, the controller from a binding's subject; both
 	// hold the upstream namespace, and the group is what joins them. A
 	// disagreement here does not fail -- the grant is written under one name and
