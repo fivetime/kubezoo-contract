@@ -71,9 +71,49 @@ func TestImpersonationGroups(t *testing.T) {
 			want:     []string{"system:authenticated", "kubezoo:proxied:111111"},
 		},
 		{
-			what:     "a ServiceAccount does not, or every workload becomes cluster-scoped",
+			// ⛔ NOT the tenant's group. This case used to assert a
+			// ServiceAccount got no kubezoo group at all, which was the right
+			// invariant when it was the only way to say "not the tenant's". It
+			// now gets one naming ITSELF, carrying only the intersection of what
+			// its role asks for with what the tenant may have -- see
+			// TenantSAGroup and ClusterScopedRulesForSA. The invariant that
+			// matters is unchanged and is the next case: never
+			// kubezoo:proxied:<tenant>, never role-author.
+			what:     "a ServiceAccount gets a group naming itself, not its tenant",
 			tenantID: "111111",
 			userName: "system:serviceaccount:111111-default:app",
+			groups:   []string{"system:serviceaccounts"},
+			want:     []string{"system:serviceaccounts", "kubezoo:proxied-sa:111111:default:app"},
+		},
+		{
+			// ⭐ The invariant the previous case used to carry, stated directly:
+			// whatever a ServiceAccount gets, it is never the tenant's own
+			// cluster-scoped group and never the escalate exemption.
+			what:     "and never the tenant's group nor the escalate exemption",
+			tenantID: "111111",
+			userName: "system:serviceaccount:111111-default:app",
+			info:     clusterRoleRequest("create"),
+			groups:   []string{"system:serviceaccounts"},
+			want:     []string{"system:serviceaccounts", "kubezoo:proxied-sa:111111:default:app"},
+		},
+		{
+			// ⛔ A PLATFORM ServiceAccount. Its namespace carries no tenant
+			// prefix, so nothing is derived from it -- otherwise a platform
+			// component reaching kubezoo would collect a tenant's group.
+			what:     "a platform ServiceAccount gets nothing",
+			tenantID: "111111",
+			userName: "system:serviceaccount:kube-system:generic-garbage-collector",
+			groups:   []string{"system:serviceaccounts"},
+			want:     []string{"system:serviceaccounts"},
+		},
+		{
+			// ⛔ And one whose namespace belongs to ANOTHER tenant. The group is
+			// built from the username the request authenticated as, so this can
+			// only happen if the two disagree -- and then it must yield nothing
+			// rather than the tenant in the context.
+			what:     "a ServiceAccount of a different tenant gets nothing",
+			tenantID: "111111",
+			userName: "system:serviceaccount:222222-default:app",
 			groups:   []string{"system:serviceaccounts"},
 			want:     []string{"system:serviceaccounts"},
 		},
@@ -82,7 +122,7 @@ func TestImpersonationGroups(t *testing.T) {
 			tenantID: "111111",
 			userName: "system:serviceaccount:111111-default:app",
 			groups:   []string{"system:serviceaccounts", "kubezoo:proxied:222222", "kubezoo:role-author"},
-			want:     []string{"system:serviceaccounts"},
+			want:     []string{"system:serviceaccounts", "kubezoo:proxied-sa:111111:default:app"},
 		},
 		{
 			what:     "and one carrying its own tenant's group gets exactly one copy",
@@ -132,11 +172,15 @@ func TestImpersonationGroups(t *testing.T) {
 			want: []string{"kubezoo:proxied:111111"},
 		},
 		{
-			what:     "nor does a ServiceAccount writing a ClusterRole",
+			// ⛔ Still no escalate exemption. It gets its own group, which
+			// carries reads over cluster-scoped objects and nothing that could
+			// widen a ClusterRole -- the exemption stays with the tenant's own
+			// credential, where RoleAuthorGroup's own comment puts it.
+			what:     "nor does a ServiceAccount writing a ClusterRole get the exemption",
 			tenantID: "111111",
 			userName: "system:serviceaccount:111111-default:app",
 			info:     clusterRoleRequest("create"),
-			want:     []string{},
+			want:     []string{"kubezoo:proxied-sa:111111:default:app"},
 		},
 	}
 

@@ -739,11 +739,15 @@ func ProxiedGroup(tenantID string) string {
 // was minted carrying it, and forwarding it would let one tenant's credential
 // ask for another tenant's role.
 //
-// The group is added only for the tenant's own credential, the identity that
-// held these permissions before. A tenant's ServiceAccounts reach upstream as
-// themselves and hold only what the tenant granted them per namespace; adding
-// the group for them would quietly turn every workload into a cluster-scoped
-// one.
+// ProxiedGroup is added only for the tenant's own credential, the identity that
+// held these permissions before. ⛔ A tenant's ServiceAccounts must NEVER get it:
+// that would quietly turn every workload into a cluster-scoped one.
+//
+// ⭐ They get a group of their own instead -- TenantSAGroup, naming the single
+// ServiceAccount -- carrying only the intersection of what its role asks for and
+// what the tenant is itself allowed (ClusterScopedRulesForSA). That is what lets
+// an operator watch its own cluster-scoped objects without every other workload
+// of that tenant gaining the same reach.
 func ImpersonationGroups(ctx context.Context, userName string, groups []string) []string {
 	tenantID := TenantIDFrom(ctx)
 	forwarded := make([]string, 0, len(groups)+2)
@@ -755,7 +759,21 @@ func ImpersonationGroups(ctx context.Context, userName string, groups []string) 
 		}
 		forwarded = append(forwarded, group)
 	}
-	if tenantID == "" || userName != TenantAdminUser(tenantID) {
+	if tenantID == "" {
+		return forwarded
+	}
+	if userName != TenantAdminUser(tenantID) {
+		// ⭐ A ServiceAccount of this tenant gets ITS OWN group, never the
+		// tenant's. See TenantSAGroup: the tenant said what this workload is for
+		// by writing the role behind it, and a per-tenant group would make every
+		// workload as cluster-scoped as the tenant itself.
+		//
+		// ⚠️ Derived from the username the request actually authenticated as, so
+		// no request can ask for another ServiceAccount's group -- there is
+		// nothing here to ask with.
+		if saTenant, namespace, name, ok := TenantSAFromUsername(userName); ok && saTenant == tenantID {
+			forwarded = append(forwarded, TenantSAGroup(tenantID, namespace, name))
+		}
 		return forwarded
 	}
 	forwarded = append(forwarded, ProxiedGroup(tenantID))
