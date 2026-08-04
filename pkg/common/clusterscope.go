@@ -89,13 +89,23 @@ func ClusterScopedRules() []rbacv1.PolicyRule {
 		rbacv1helpers.NewRule("get", "list", "watch").
 			Groups("resource.k8s.io").Resources("deviceclasses").RuleOrDie(),
 
-		// ⭐ The tenant's own DRA objects. Namespaced, so the projection carries
-		// them -- listed here only because the cluster-scoped rules are what a
-		// tenant holds across all of its namespaces.
-		rbacv1helpers.NewRule("get", "list", "watch", "create", "update", "patch",
-			"delete", "deletecollection").
-			Groups("resource.k8s.io").
-			Resources("resourceclaims", "resourceclaims/status", "resourceclaimtemplates").RuleOrDie(),
+		// ⛔ resourceclaims, resourceclaims/status and resourceclaimtemplates were
+		// here, under a comment saying the cluster-scoped rules are "what a tenant
+		// holds across all of its namespaces". That reads well and is wrong: this
+		// list becomes a ClusterRole the controller binds with a
+		// ClusterRoleBinding, so a NAMESPACED resource listed here is granted in
+		// every namespace upstream, other tenants' included.
+		//
+		// Nothing was reachable through it -- kubezoo is the only door, and it
+		// rewrites the namespace and filters the list -- so upstream RBAC was
+		// never what contained this. But it is exactly the shape
+		// TestClusterScopedGrantsCoverWhatWeServe exists to refuse, and it widened
+		// the ceiling that ClusterScopedRulesForSA intersects a tenant
+		// ServiceAccount's own request against.
+		//
+		// The tenant loses nothing: kubezoo:tenant-namespace-admin is "*" on "*",
+		// RoleBound in each of the tenant's namespaces, so its namespaced DRA
+		// objects were always granted there and still are.
 
 		// Prefixed by the convertor, so tenants cannot collide or reach each
 		// other's.
