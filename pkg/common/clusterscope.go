@@ -76,6 +76,27 @@ func ClusterScopedRules() []rbacv1.PolicyRule {
 			// publishing storage classes in the first place.
 			"volumeattributesclasses").RuleOrDie(),
 
+		// ⭐ DeviceClasses, read-only, for the same reason again: a ResourceClaim
+		// naming an unpublished one is refused, and refusing a name the tenant
+		// has no way to enumerate is exactly the complaint that made storage
+		// classes discoverable in the first place.
+		//
+		// ⛔ resourceslices is deliberately NOT here. It carries spec.nodeName,
+		// spec.nodeSelector and each machine's device inventory -- the platform's
+		// hardware, per node. Nodes were withdrawn from tenants for that, and
+		// this is the same thing by another name. A tenant asks for a device
+		// CLASS; the scheduler finds the hardware.
+		rbacv1helpers.NewRule("get", "list", "watch").
+			Groups("resource.k8s.io").Resources("deviceclasses").RuleOrDie(),
+
+		// ⭐ The tenant's own DRA objects. Namespaced, so the projection carries
+		// them -- listed here only because the cluster-scoped rules are what a
+		// tenant holds across all of its namespaces.
+		rbacv1helpers.NewRule("get", "list", "watch", "create", "update", "patch",
+			"delete", "deletecollection").
+			Groups("resource.k8s.io").
+			Resources("resourceclaims", "resourceclaims/status", "resourceclaimtemplates").RuleOrDie(),
+
 		// Prefixed by the convertor, so tenants cannot collide or reach each
 		// other's.
 		rbacv1helpers.NewRule("get", "list", "watch", "create", "update", "patch",

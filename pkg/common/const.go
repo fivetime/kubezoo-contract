@@ -102,6 +102,22 @@ const (
 	// tenantProxy.refuseUnpublishedVolumeAttributesClass.
 	VolumeAttributesClassPublishedLabelKey = "volumeattributesclass.kubezoo.io/published"
 
+	// DeviceClassPublishedLabelKey marks a DeviceClass a tenant may name in a
+	// ResourceClaim's spec.devices.requests[].deviceClassName.
+	//
+	// ⭐ The fourth of these, and the same shape for the same reason: a
+	// cluster-scoped object the PLATFORM owns, referenced by NAME from inside a
+	// tenant's object. Storage classes, ingress classes and volume attributes
+	// classes each arrived as "the field is passed through untranslated, so a
+	// tenant naming the platform's own gets it" -- this one is being wired at
+	// the moment the API group is opened rather than after.
+	//
+	// ⚠️ Publishing NOTHING by default, like VolumeAttributesClass. A DeviceClass
+	// selects HARDWARE -- which GPUs, which accelerators -- so it is a tier a
+	// platform sells rather than a choice a tenant makes freely, and there is no
+	// existing pass-through behaviour to stay compatible with.
+	DeviceClassPublishedLabelKey = "deviceclass.kubezoo.io/published"
+
 	// PublishedTrue means tenants may see the class and use it for new objects.
 	PublishedTrue = "true"
 	// PublishedDeprecated means tenants may still SEE the class -- so that an
