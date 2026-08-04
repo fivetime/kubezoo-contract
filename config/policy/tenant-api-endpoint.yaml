@@ -1,9 +1,16 @@
 # 让租户负载的 in-cluster 客户端打到 kubezoo,而不是上游 apiserver。
 #
-# ⭐ 这条是"租户能不能用 K8s 生态"的枢纽。租户的 Pod 默认直连上游
-# (kubelet 注入 KUBERNETES_SERVICE_HOST),在那里它看到的 CRD 组带租户前缀
-# (`111111-example.com`),而 operator 代码里查的是 `example.com` → 404,
+# ⭐ 这条是"租户能不能用 K8s 生态"的枢纽,而且在**网络隔离的部署形态**下
+# (operations-cn.md §1.2:租户网络够不到上游 apiserver)它是**必需品而非加固**:
+# kubelet 注入的 KUBERNETES_SERVICE_HOST 指向上游,而上游在网络上不可达
+# ⇒ 不改道的话租户负载**谁也连不上**,in-cluster 客户端直接超时。
+#
+# ⚠️ 没有网络隔离时它同样必需,只是坏法不同:Pod 直连上游,在那里看到的 CRD 组
+# 带租户前缀(`111111-example.com`),而 operator 代码里查的是 `example.com` → 404,
 # 装什么 operator 都跑不起来(审计 §X③)。
+#
+# ⛔ 无论哪种形态,这条策略都**不是隔离手段**:它是准入时改 podspec 的 env,
+# 是**改道不是阻断**。把租户挡在上游之外那件事由网络层做,见 operations-cn.md §1.2。
 #
 # podspec 里同名 env **压过 kubelet 注入的那个**,所以注入即可,workload 零改动。
 # client-go 的 InClusterConfig 就是读这两个变量(rest/config.go:551)。

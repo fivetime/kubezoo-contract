@@ -1,8 +1,20 @@
 # 冻结的租户不得再写任何东西 —— 包括它预置的 ServiceAccount。
 #
-# ⚠️ 原生 VAP,不是 Kyverno。原因是结构性的(审计 §S):
-# 租户的 Pod 拿 SA token **直连上游 apiserver,完全不经过 kubezoo**,
-# 所以冻结必须在**上游**强制,前门那一层只管租户本人的 kubectl。
+# ⚠️ 原生 VAP,不是 Kyverno,而且必须在**上游**强制。理由更新过一次,结论没变:
+#
+#   早先(审计 §S 实测):租户的 Pod 拿 SA token **直连上游,完全不经过 kubezoo**,
+#   所以前门那一层只管租户本人的 kubectl。
+#
+#   现在的部署形态把那条路在**网络上**堵住了(见 operations-cn.md §1.2),
+#   而且前门的 WithTenantSuspension **确实覆盖 SA 请求**(租户 ID 从
+#   system:serviceaccount:<tid>-ns:name 里切出来)。⇒ 上面那个理由不再成立。
+#
+# ⭐ 但这条策略**仍然承重**,换了个理由:WithTenantSuspension 在 informer 缓存里
+#   找不到租户时是**放行**的 —— 那是刻意的 fail-open,注释里写着"靠上游 RBAC 兜底"。
+#   这条 VAP 就是那个"上游"。没有它,那次放行没有任何东西接住。
+#
+# ⛔ 所以两条前提别混:网络隔离让"绕过前门"这条路消失,它并不让"前门自己放行"
+#   这件事消失,而后者是设计里明写的。
 #
 # 为什么单靠撤销 RoleBinding 不够(审计 §T,实测):
 #   冻结撤销的是 kubezoo 下发的 kubezoo:tenant-admin;
