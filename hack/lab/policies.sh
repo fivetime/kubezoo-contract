@@ -53,12 +53,24 @@ kubectl --context "$CONTEXT" get validatingadmissionpolicy \
 # ⚠️ 一条列出来但没有状态的策略是**什么都没在管**,而 READY=<none> 读起来像
 # "还在同步"而不是"坏了"。这事真发生过:我们自己的一条策略拒掉了 Kyverno 注册
 # webhook 所需的写操作,于是三条策略永远不 ready,Pod 全部起不来。
+#
+# ⛔ 这个守卫**自己烂过一次**:它原先读 `.status.ready`,而 Kyverno 后来改成在
+# `.status.conditions[type=Ready]` 里报。于是读到的永远是空 —— 每轮白等满 120s,
+# **而且它想守的那件事从此永远守不住**(空和"坏了"长得一模一样)。
+# ⇒ 现在读 conditions,并且**一个就绪信号都拿不到就报错退出**,不静默继续:
+#   沉默的守卫比没有守卫更坏,因为它让人以为有东西在看着。
+READY_JSONPATH='{range .items[*]}{.metadata.name}={.status.conditions[?(@.type=="Ready")].status}{"\n"}{end}'
 for _ in $(seq 60); do
   notready=$(kubectl --context "$CONTEXT" get clusterpolicy \
-    -o jsonpath='{range .items[*]}{.metadata.name}={.status.ready}{"\n"}{end}' 2>/dev/null \
-    | grep -cv '=true$' || true)
+    -o jsonpath="$READY_JSONPATH" 2>/dev/null | grep -cv '=True$' || true)
   [ "$notready" = 0 ] && break
   sleep 2
 done
-kubectl --context "$CONTEXT" get clusterpolicy \
-  -o custom-columns=NAME:.metadata.name,READY:.status.ready --no-headers 2>/dev/null
+policy_states=$(kubectl --context "$CONTEXT" get clusterpolicy -o jsonpath="$READY_JSONPATH" 2>/dev/null | sed '/^$/d')
+echo "$policy_states" | sed 's/^/policy: /'
+if [ -n "$policy_states" ] && ! echo "$policy_states" | grep -q '=True$'; then
+  echo "FATAL: 一条 ClusterPolicy 都没有报告就绪。" >&2
+  echo "       要么策略真的全坏了,要么 Kyverno 又换了报告就绪的字段 ——" >&2
+  echo "       两种都必须停下来看:继续跑只会让后面的断言以看不懂的方式失败。" >&2
+  exit 1
+fi
