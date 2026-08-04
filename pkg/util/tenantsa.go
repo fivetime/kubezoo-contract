@@ -37,17 +37,28 @@ import (
 //
 // ⚠️ Under kubezooGroupPrefix, so the front door drops it if it ever arrives on
 // an incoming credential rather than being added here.
-func TenantSAGroup(tenantID, namespace, name string) string {
-	return fmt.Sprintf("%sproxied-sa:%s:%s:%s", kubezooGroupPrefix, tenantID, namespace, name)
+//
+// ⛔ upstreamNamespace is the namespace AS UPSTREAM CALLS IT -- `909090-default`,
+// not `default` -- and the prefix is taken off here rather than by the caller.
+// Both sides then pass what they naturally hold: kubezoo has it out of the
+// ServiceAccount's username, the controller has it off the binding's subject.
+// The first version took the tenant's own name for it and left the trimming to
+// whoever called: the controller passed the upstream form, kubezoo passed the
+// trimmed one, the two group names differed by a prefix, and the grant simply
+// never applied -- with nothing anywhere reporting a mismatch. Sharing the
+// function was not enough; it had to share the input.
+func TenantSAGroup(tenantID, upstreamNamespace, name string) string {
+	return fmt.Sprintf("%sproxied-sa:%s:%s:%s", kubezooGroupPrefix, tenantID,
+		TrimTenantIDPrefix(tenantID, upstreamNamespace), name)
 }
 
 // TenantSAFromUsername splits an upstream ServiceAccount username into the
 // tenant it belongs to and its own namespace and name.
 //
-// ⚠️ The namespace it returns is the TENANT's, with the prefix taken off --
-// `909090-default` becomes `default`. The group is built from what the tenant
-// calls things, so that the tenant's own ClusterRoleBinding, which names
-// `default`, is what decides.
+// ⚠️ The namespace it returns is the one UPSTREAM uses, prefix and all, because
+// that is what TenantSAGroup takes. Trimming here and there would be two places
+// that must agree, which is the mismatch that made this feature silently do
+// nothing the first time.
 func TenantSAFromUsername(username string) (tenantID, namespace, name string, ok bool) {
 	const prefix = "system:serviceaccount:"
 	if !strings.HasPrefix(username, prefix) {
@@ -67,8 +78,7 @@ func TenantSAFromUsername(username string) (tenantID, namespace, name string, ok
 		return "", "", "", false
 	}
 	tenantID = upstreamNamespace[:TenantIDLength]
-	namespace = upstreamNamespace[TenantIDLength+len(TenantIDSeparator):]
-	return tenantID, namespace, parts[1], true
+	return tenantID, upstreamNamespace, parts[1], true
 }
 
 // ClusterScopedRulesForSA is the intersection a tenant's ServiceAccount may hold

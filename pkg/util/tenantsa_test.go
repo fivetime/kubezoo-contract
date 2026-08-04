@@ -164,10 +164,24 @@ func TestClusterScopedRulesForSA(t *testing.T) {
 // ServiceAccounts -- which is how a tenant says it does not trust them equally
 // -- would stop meaning anything.
 func TestTenantSAGroupIsPerServiceAccount(t *testing.T) {
-	a := TenantSAGroup("909090", "default", "cainjector")
-	b := TenantSAGroup("909090", "default", "some-other-op")
-	c := TenantSAGroup("909090", "other-ns", "cainjector")
-	d := TenantSAGroup("111111", "default", "cainjector")
+	a := TenantSAGroup("909090", "909090-default", "cainjector")
+	b := TenantSAGroup("909090", "909090-default", "some-other-op")
+	c := TenantSAGroup("909090", "909090-other-ns", "cainjector")
+	d := TenantSAGroup("111111", "111111-default", "cainjector")
+
+	// ⭐⭐ The two callers must land on the same name. kubezoo builds it from a
+	// ServiceAccount's username, the controller from a binding's subject; both
+	// hold the upstream namespace, and the group is what joins them. A
+	// disagreement here does not fail -- the grant is written under one name and
+	// asserted under another, and nothing anywhere says so.
+	tenant, ns, name, ok := TenantSAFromUsername("system:serviceaccount:909090-default:cainjector")
+	if !ok {
+		t.Fatal("could not read the username back")
+	}
+	if fromUsername := TenantSAGroup(tenant, ns, name); fromUsername != a {
+		t.Errorf("the group built from a username is %q, and from a subject %q; a grant written "+
+			"under one and asserted under the other simply never applies", fromUsername, a)
+	}
 	for _, other := range []string{b, c, d} {
 		if a == other {
 			t.Errorf("%q collides with %q; the group does not distinguish the ServiceAccount", a, other)
@@ -175,7 +189,7 @@ func TestTenantSAGroupIsPerServiceAccount(t *testing.T) {
 	}
 	// ⚠️ Under kubezoo's own prefix, so the front door drops it if it ever
 	// arrives on an incoming credential instead of being added on the way out.
-	if got := TenantSAGroup("909090", "default", "cainjector"); got[:len(kubezooGroupPrefix)] != kubezooGroupPrefix {
+	if got := TenantSAGroup("909090", "909090-default", "cainjector"); got[:len(kubezooGroupPrefix)] != kubezooGroupPrefix {
 		t.Errorf("group %q is not under %q, so a mis-issued credential carrying it would be forwarded", got, kubezooGroupPrefix)
 	}
 }
@@ -188,10 +202,13 @@ func TestTenantSAFromUsername(t *testing.T) {
 		wantOK                    bool
 		tenant, namespace, svcAcc string
 	}{
+		// ⚠️ The namespace comes back as UPSTREAM has it, prefix included --
+		// that is what TenantSAGroup takes, and trimming in two places is the
+		// mismatch that made this feature silently grant nothing the first time.
 		{in: "system:serviceaccount:909090-default:cainjector", wantOK: true,
-			tenant: "909090", namespace: "default", svcAcc: "cainjector"},
+			tenant: "909090", namespace: "909090-default", svcAcc: "cainjector"},
 		{in: "system:serviceaccount:909090-kube-system:op", wantOK: true,
-			tenant: "909090", namespace: "kube-system", svcAcc: "op"},
+			tenant: "909090", namespace: "909090-kube-system", svcAcc: "op"},
 		// ⛔ A platform ServiceAccount. Its namespace carries no tenant prefix,
 		// and reading one out of it would hand a platform component a tenant's
 		// group.
