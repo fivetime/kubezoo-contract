@@ -43,6 +43,10 @@
 | `tenant-pod-security.yaml` | Pod 强制 `restricted`;并把 namespace 的 PSA 标签钉回 `restricted` | 租户拿到 privileged + hostNetwork 的 Pod。⛔ **原生 PSA 顶不上**:它的判定输入是 namespace 标签,而那个标签租户自己能写 |
 | `tenant-scheduling.yaml` | 拒 `spec.nodeName` | 租户可绕过调度器钉节点 |
 | `tenant-placement.yaml` | **整体替换**租户的 `nodeSelector`/`tolerations`/`affinity`/`topologySpreadConstraints`/`schedulerName`,换成该租户池子的 | 租户可自选落点。⭐ 注入的 `nodeSelector` 还是 `pods/binding` 那条路上的唯一拦阻(kubelet 不检 NoSchedule 污点但检它)—— **前提是池子标签每租户专属**,已用负向对照证实 |
+| `tenant-own-namespace-name.yaml` | 租户只能用**自己视角**的 namespace 名 | 见文件顶部 |
+| `tenant-api-endpoint.yaml` | 把 `KUBERNETES_SERVICE_HOST` 注进租户 Pod,指向 kubezoo | 租户负载直连上游 apiserver,绕过整个翻译层 |
+| `tenant-ingress-hostnames.yaml` | 主机名只能落在租户自己的子域 —— ⭐**三张表**:`spec.rules[].host`、`spec.tls[].hosts`、以及**不在 spec 里**的 `server-alias` 注解 | 任何租户可声明任何主机名,由 ingress 控制器按创建顺序裁决,**落败方零报错** |
+| `tenant-ingress-annotations.yaml` | 拒绝 ingress 控制器**上游自己标为 Critical/High** 的注解(`server-alias` 除外,归上一条管) | 租户能往**与所有租户共用的 nginx.conf** 注入原始配置,并让**平台的**控制器向任意地址发起连接 |
 
 | `tenant-deny-binding.yaml` | 租户不得直接 bind Pod 到节点(**原生 VAP,不是 Kyverno**) | 租户可把 Pod 绑到别的租户节点(API 层成功,靠 kubelet 遏制) |
 
@@ -132,7 +136,9 @@ k8s 的语义是"cluster-scoped 资源永不跳过策略"。少了 `scope: Names
 
 ### 7. 改完策略跑 `hack/lab/verify.sh`
 
-21 条断言,每条都**提交一个必须被拒的东西再看它被谁拒**。已验证摘掉策略会红。
+每条断言都**提交一个必须被拒的东西再看它被谁拒**,并且都验证过摘掉策略会红。
+⚠️ 这里原本写着"21 条断言" —— 那个数字早就不对了(现在两百多条),而**写死的计数会
+悄悄变成假话**:它只在有人去数的时候才被发现,而没人会去数。要看规模就跑一次。
 `READY=True` 不是证据 —— 本项目在这上面栽过四次。
 
 ⛔ **跑之前必须带 `KUBEZOO_CONTRACT_DIR`,否则你改的策略根本不上场。**

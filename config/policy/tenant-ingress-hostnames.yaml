@@ -76,6 +76,37 @@ spec:
         "an Ingress may only list host names under this tenant's own subdomain (" +
         variables.tenantSuffix + ") in spec.tls; naming another domain there makes the
         ingress controller answer TLS for a name this tenant does not own"
+    # ⛔ 第三张主机名表,而且它**不在 spec 里** —— `server-alias` 注解。
+    # 上游模板把它和 host 放进**同一条 server_name**:
+    #   rootfs/etc/nginx/template/nginx.tmpl:639
+    #   server_name {{ buildServerName $server.Hostname }} {{ range $server.Aliases }}"{{ . }}" {{ end }};
+    # ⇒ 上面两条 validation 拦下的东西,一条注解就能原样拿回去。
+    # 这不是"注解没过滤"这种泛泛的话:它是**这条策略自己**的一个绕过口。
+    #
+    # ⚠️ 不是禁掉,是**同样约束**:租户给自己的子域加 alias 是正当用法。
+    # (其余高风险注解由 tenant-ingress-annotations 整族拒绝,唯独这条留在这里,
+    #  因为它是主机名声明,归这条策略管。)
+    #
+    # ⛔ 三个细节都来自上游 `ValidateArrayOfServerName`
+    # (internal/ingress/annotations/parser/validators.go:89),不是猜的:
+    #  1. 值是**逗号分隔的一串**,不是单个名字 —— 只查整串就等于只查最后一段;
+    #  2. 每一项**允许是正则**(上游注释原话:"They can be *.something*,
+    #     ~^www\d+\.example\.com$")。nginx 的正则 server_name 不隐式锚定,
+    #     "以租户后缀结尾的正则"和"租户后缀下的主机名"是两回事 ⇒ 带 `~` 的一律拒,
+    #     这比去推 nginx 的正则匹配语义可靠。
+    #  3. 上游逐项 TrimSpace,所以这里也 trim —— 否则 "a.x, b.x" 的第二项会因为
+    #     前导空格被误拒,而上游本来是接受的。
+    - expression: >-
+        !has(object.metadata.annotations) ||
+        !("nginx.ingress.kubernetes.io/server-alias" in object.metadata.annotations) ||
+        object.metadata.annotations["nginx.ingress.kubernetes.io/server-alias"]
+          .split(",").all(alias,
+            !alias.contains("~") && alias.trim().endsWith(variables.tenantSuffix))
+      messageExpression: >-
+        "the server-alias annotation is a second list of host names -- the ingress
+        controller puts it into the same server_name as spec.rules[].host -- so it is
+        held to the same rule: every entry must fall under this tenant's own subdomain
+        (" + variables.tenantSuffix + "), and none may be a regex"
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding

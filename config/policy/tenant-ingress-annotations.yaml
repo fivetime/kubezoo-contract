@@ -1,0 +1,98 @@
+# 租户不得使用 ingress 控制器上高风险的注解。
+#
+# ⛔ 不加这条会怎样:`spec.rules[].host` 有 tenant-ingress-hostnames 管着,
+# **注解一条都没人管** —— kubezoo 侧 `pkg/convert/ingress.go` 只动
+# `ingressClassName` 和废弃的 `kubernetes.io/ingress.class`,别的注解**原样**
+# 送到上游;策略层这边此前也只读 `spec.rules[].host` 和 `spec.tls[].hosts` 两张表。
+# 而注解是 ingress 控制器的**主要配置面**:它们被写进**一份共享的 nginx.conf**,
+# 由**平台的**控制器进程去解释和执行。
+#
+# ⭐ 这张名单不是我按危险程度自己排的,是**上游自己标的**。
+# ingress-nginx 每条注解都带一个 `Risk` 字段
+# (`internal/ingress/annotations/parser/main.go` 的 `AnnotationRisk`),
+# 下面这些就是它标成 Critical / High 的全部,取自 `dbb11b9`(2026-03-19):
+#
+#   Critical  auth-snippet / configuration-snippet / modsecurity-snippet /
+#             server-snippet / stream-snippet          —— 原始 nginx 配置注入
+#   High      auth-url / auth-signin                   —— 由**控制器进程**向任意 URL 发子请求
+#             mirror-target / mirror-host              —— 把请求镜像到任意目的地
+#             proxy-ssl-name / auth-tls-error-page /
+#             auth-tls-match-cn / modsecurity-transaction-id /
+#             upstream-hash-by                         —— 可带 nginx 变量,注入共享配置
+#
+# 重新导出这份名单的办法(换控制器版本时照跑):
+#
+#   grep -rn "AnnotationRiskCritical\|AnnotationRiskHigh" \
+#       internal/ingress/annotations/*/*.go
+#
+# ⭐ `server-alias` 也在上游的 High 里,但**不在这张拒绝名单上** —— 它是一个
+# **主机名声明**,归 tenant-ingress-hostnames 管:落在租户自己子域下的 alias 是
+# 正当用法,没有理由禁。见那条策略里新加的第三条 validation。
+#
+# ⚠️ 三条必须说清楚的前提,不然这条策略的价值会被高估或低估:
+#
+#  1. **snippet 那五条上游默认就是关的** —— `AllowSnippetAnnotations` 在
+#     `internal/ingress/controller/config/config.go:765` 默认 `false`。
+#     这里照拒,是因为平台哪天为自己的需要打开那个开关时,不该顺手把它交给租户。
+#  2. **secret 引用那族(`auth-secret` / `auth-tls-secret` / `proxy-ssl-secret` /
+#     `fastcgi-params-configmap`)不在名单上,因为上游已经堵住了**:
+#     `AllowCrossNamespaceResources` 默认 `false`,五处调用点(auth / authreq /
+#     authtls / fastcgi / proxyssl)都会在 namespace 不等于 Ingress 自己的
+#     namespace 时拒绝。⚠️ 但它有个**可用性**尾巴:租户写 `default/tls`(它自己看到的
+#     namespace)会被上游拒,因为上游那边它叫 `<租户ID>-default` —— kubezoo
+#     **不翻译注解里的引用**。写不带 namespace 的裸名字才是对的。
+#  3. **注解前缀是可配的**(`--annotations-prefix`,默认
+#     `nginx.ingress.kubernetes.io`)。平台改了前缀,这条策略就要跟着改,
+#     否则它会**静默地什么都不拦** —— 和 policies.sh 顶上那段说的是同一个道理。
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: tenant-ingress-annotations
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ["networking.k8s.io"]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["ingresses"]
+        scope: Namespaced
+  variables:
+    # ⛔ annotations 是**可选**字段。CEL 读一个不存在的字段是求值出错,配上
+    # failurePolicy: Fail 就等于拒绝 —— tenant-ingress-hostnames 已经在
+    # spec.rules 上踩过一模一样的坑,而且那次连拒绝理由都是空的。
+    - name: annotations
+      expression: 'has(object.metadata.annotations) ? object.metadata.annotations : {}'
+    - name: refused
+      expression: >-
+        ["auth-snippet", "configuration-snippet", "modsecurity-snippet",
+         "server-snippet", "stream-snippet",
+         "auth-url", "auth-signin", "mirror-target", "mirror-host",
+         "proxy-ssl-name", "auth-tls-error-page", "auth-tls-match-cn",
+         "modsecurity-transaction-id", "upstream-hash-by"]
+    - name: used
+      expression: >-
+        variables.refused.filter(a,
+          ("nginx.ingress.kubernetes.io/" + a) in variables.annotations)
+  validations:
+    - expression: 'size(variables.used) == 0'
+      messageExpression: >-
+        "these Ingress annotations are reserved to the platform: " +
+        variables.used.join(", ") + ". They are interpreted by the platform's own
+        ingress controller, in a configuration file shared with every other tenant:
+        the snippet family injects raw configuration, auth-url and mirror-target make
+        the controller open connections of the tenant's choosing from the platform's
+        network, and the rest carry nginx variables into that shared file"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: tenant-ingress-annotations
+spec:
+  policyName: tenant-ingress-annotations
+  validationActions: [Deny]
+  matchResources:
+    namespaceSelector:
+      matchExpressions:
+        - key: kubezoo.io/tenant
+          operator: Exists
