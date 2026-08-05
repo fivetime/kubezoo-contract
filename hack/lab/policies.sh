@@ -20,6 +20,11 @@ DOMAIN_SUFFIX=${2:-${TENANT_DOMAIN_SUFFIX:-apps.example.com}}
 # **连不上任何 apiserver**,而整套 lab 照样绿 —— 因为没有一条断言是从 Pod 里
 # 发出去的。真装一个 operator 才暴露:它的每个 Pod 都在解析那个字面量。
 KUBEZOO_ADDRESS=${3:-${KUBEZOO_ADDRESS:-}}
+# 允许租户拉镜像的仓库,逗号分隔的主机名(带端口就写端口)。
+# ⚠️ 默认只有 docker.io,因为 lab 里租户用的全是 Docker Hub 上的镜像
+# (busybox / busybox:1.36 / curlimages/curl)。真实平台请换成自己的。
+# 裸名字(busybox)和 org/name(library/busybox)都算 docker.io,见策略里的注释。
+TENANT_IMAGE_REGISTRIES=${TENANT_IMAGE_REGISTRIES:-docker.io}
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
@@ -36,6 +41,11 @@ fi
 # 原样装一个占位符 —— 那会拒掉每一个租户 Ingress。
 cp "$HERE"/config/policy/*.yaml "$WORK/"
 sed -i "s/TENANT_DOMAIN_SUFFIX/$DOMAIN_SUFFIX/" "$WORK/tenant-ingress-hostnames.yaml"
+# ⚠️ 这个占位符在 CEL 里是一个**列表字面量的内容**,不是一个字符串:
+# `[TENANT_IMAGE_REGISTRIES]` 要变成 `["a","b"]`。所以逗号分隔的输入必须逐项加引号,
+# 直接塞进去会是 `[a,b]` —— 那是两个未定义的标识符,策略连编译都过不了。
+registries_cel=$(printf '%s' "$TENANT_IMAGE_REGISTRIES" | sed 's/[^,]*/"&"/g')
+sed -i "s|TENANT_IMAGE_REGISTRIES|$registries_cel|" "$WORK/tenant-image-registries.yaml"
 if [ -z "$KUBEZOO_ADDRESS" ]; then
   echo "FATAL: 没有给 kubezoo 的可达地址。装上去的策略会把字面量" >&2
   echo "       KUBEZOO_ADDRESS_PLACEHOLDER 注进每个租户 Pod,而那些 Pod" >&2

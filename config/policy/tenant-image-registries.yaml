@@ -1,0 +1,123 @@
+# 租户只能从平台允许的镜像仓库拉镜像。
+#
+# ⛔ 不加这条会怎样(实测,不是推的):`image` 字段全链路**零处理** ——
+# kubezoo 的 pkg/proxy 和 pkg/convert 对它 0 命中,策略层此前也没有任何一条碰它。
+# 于是镜像地址就是一个**由 kubelet 拨号的任意地址**,而 kubelet 在**节点的网络
+# 命名空间**里,租户的 OVN 分段够不到那里。
+#
+# ⭐ 而且它的回显比探针那条强得多。kz-audit3 实测,两个 Pod:
+#
+#   image: 10.244.0.1:5000/x    →  dial tcp 10.244.0.1:5000: connect: connection refused
+#   image: 10.99.99.99:5000/x   →  dial tcp 10.99.99.99:5000: i/o timeout
+#
+# 端口开 / 端口关 / 被过滤三态可分,地址和端口原样回显,租户
+# `kubectl describe pod` 就读到(kubezoo 服务 events)。探针那条只有 Ready 条件
+# 一个 bit;这条直接给出 dial 的错误字符串。
+#
+# ⚠️ 定性要诚实:镜像仓库白名单是任何平台**本来就该有**的东西(供应链),
+# 这条策略本身没什么新意。上面那次测量新增的信息只有一条:**没有它不只是供应链
+# 缺口,而是一台平台自己按租户设定的节奏运行的扫描器。**
+#
+# ⚠️ 这条按 namespace 生效,而租户 namespace 里跑的**不全是租户的东西** ——
+# 平台自己也会往那里投对象(lab 里就有一个 platform-converge Deployment)。
+# 所以平台自用镜像的仓库也必须在清单里,否则被拒的是平台自己的组件,
+# 而且报的是一条听起来像租户越权的消息。
+#
+# ⚠️⚠️ 下面的仓库清单是**环境相关的**,部署时必须换成本平台允许的那些。
+# 判据同 tenant-ingress-hostnames:纯写路径、不看响应、换个平台会变 ⇒ 策略层。
+#
+# ⛔⛔ 为什么是原生 VAP 而不是 Kyverno —— 这条不是风格选择,是躲一个雷。
+# Kyverno 的 autogen 对 `validate.deny` **只改 message 里的变量引用,deny 条件
+# 原样拷贝**(kyverno pkg/autogen/v1/rule.go:167,已读源码)。也就是说条件里写
+# `spec.containers` 的规则,派生到 Deployment 上仍然读 `spec.containers` ——
+# 那里是空的 ⇒ **规则 Ready,而且永远不拒**。这正是本目录 README 里记过两次的
+# "Ready 但什么都不做"。VAP 没有 autogen,9 个 kind 的路径由下面那条 CEL 自己
+# 分支,分支写错会立刻报错而不是静默放行。
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: tenant-image-registries
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      # ⛔ scope: Namespaced 不是装饰 —— 见 README §6:VAP 的 namespaceSelector
+      # 对集群级资源根本不过滤,少了它这条会套到全集群每一次集群级写入上。
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        # ⛔ pods/ephemeralcontainers is listed on purpose, and leaving it out was a
+        # hole in this policy's first draft. An ephemeral container's image CANNOT
+        # be set on a Pod create or update -- upstream only accepts it through that
+        # subresource -- and kubezoo serves the subresource to tenants
+        # (cmd/kubezoo/app/apigroups.go:150). Matching "pods" alone would have made
+        # the ephemeralContainers term below dead code: present, plausible, and
+        # never reached.
+        resources: ["pods", "pods/ephemeralcontainers", "podtemplates", "replicationcontrollers"]
+        scope: Namespaced
+      - apiGroups: ["apps"]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["deployments", "replicasets", "statefulsets", "daemonsets"]
+        scope: Namespaced
+      - apiGroups: ["batch"]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["jobs", "cronjobs"]
+        scope: Namespaced
+  variables:
+    # PodSpec 嵌在 9 个 kind 里,四种形状。顺序有讲究:CronJob 同时有
+    # spec.jobTemplate 而没有 spec.template,先判它;PodTemplate 的 template 在
+    # 顶层不在 spec 下,单列;剩下 7 个控制器都是 spec.template;Pod 自己是 spec。
+    - name: podSpec
+      expression: >-
+        has(object.spec) && has(object.spec.jobTemplate)
+          ? object.spec.jobTemplate.spec.template.spec
+          : (has(object.spec) && has(object.spec.template)
+              ? object.spec.template.spec
+              : (has(object.template) ? object.template.spec : object.spec))
+    # ⚠️ initContainers 和 ephemeralContainers 一起 —— "规则只打了一个列表、
+    # 漏掉它的孪生兄弟"是这套代码里重复次数最多的缺陷。
+    - name: images
+      expression: >-
+        (has(variables.podSpec.containers) ? variables.podSpec.containers.map(c, c.image) : []) +
+        (has(variables.podSpec.initContainers) ? variables.podSpec.initContainers.map(c, c.image) : []) +
+        (has(variables.podSpec.ephemeralContainers) ? variables.podSpec.ephemeralContainers.map(c, c.image) : [])
+    - name: allowed
+      expression: '[TENANT_IMAGE_REGISTRIES]'
+    # 一个镜像引用的第一段是仓库主机,**当且仅当**它里面有 `/` 且第一段像个主机名。
+    #
+    # ⛔ 这两个条件缺一不可,而且"含 `:` 就是主机"单独用是错的:`busybox:1.36`
+    # 一个 `/` 都没有,第一段就是 `busybox:1.36`,它含 `:` ——照那个写法会被判成
+    # 主机 `busybox:1.36` 然后拒掉,**把最常见的镜像写法全拒了**。
+    # 没有 `/` ⇒ Docker Hub 的裸名字;有 `/` 但第一段不像主机(`library/busybox`)
+    # ⇒ 还是 Docker Hub。两种都归 docker.io。
+    - name: offRegistry
+      expression: >-
+        variables.images.filter(img,
+          !img.contains("/")
+            ? !variables.allowed.exists(r, r == "docker.io")
+            : ((img.split("/")[0].contains(".") || img.split("/")[0].contains(":") ||
+                img.split("/")[0] == "localhost")
+                 ? !variables.allowed.exists(r, r == img.split("/")[0])
+                 : !variables.allowed.exists(r, r == "docker.io")))
+  validations:
+    - expression: 'size(variables.offRegistry) == 0'
+      messageExpression: >-
+        "these images are not from a registry this platform allows: " +
+        variables.offRegistry.join(", ") + ". A registry address is dialled BY THE
+        KUBELET, from the node's network rather than the tenant's, and the pull error
+        is reported back in an Event -- naming an address here reads its reachability"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: tenant-image-registries
+spec:
+  policyName: tenant-image-registries
+  validationActions: [Deny]
+  matchResources:
+    namespaceSelector:
+      matchExpressions:
+        - key: kubezoo.io/tenant
+          operator: Exists
