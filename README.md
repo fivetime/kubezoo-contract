@@ -76,6 +76,20 @@ make test-unit       # 只跑单测
 namespace 级的)拿去和**真实 apiserver 的 discovery** 对照。所有前缀化决策都建立在这张表上,
 而**拿表跟表自己对照是查不出表过期的** —— 所以它必须起一个真的 apiserver。
 
+## 数据面契约(`docs/`)
+
+kubezoo 与**数据面**之间的约定 —— 与本仓库其余部分不同,这里的两方是
+kubezoo-gateway 和某个数据面实现(kubezun / kubetron),而不是 gateway 与 controller。
+
+放在这里的判据和策略层是同一条:**同一套租户词汇被另一个仓库重新实现一遍,
+两边漂移的后果是静默的**。数据面按错的键名写注解,kubezoo 什么都不会说 ——
+它只是继续报那个租户拨不通的地址。
+
+- [`docs/dataplane-cluster-ip-cn.md`](docs/dataplane-cluster-ip-cn.md) ——
+  租户视角的 `spec.clusterIP`。数据面把租户真正能拨通的地址写进
+  `kubezoo.io/cluster-ip`,kubezoo 翻译后报给租户,**租户的 CoreDNS 因此自动答对,
+  一行不用改**。⛔ 方向和 `lbipam.cilium.io/ips` 相反:平台写、租户只读。
+
 ## 策略层(`config/policy/`)
 
 Kyverno 和原生 `ValidatingAdmissionPolicy` 的规则:PSA 等价约束、落点注入、
