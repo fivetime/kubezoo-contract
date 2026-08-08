@@ -13,11 +13,15 @@
 #
 # ⚠️ 用了 JSON6902 就没有 autogen(见 README),所以 9 个 kind 全部显式写。
 #
-# ⛔ 每条规则都 exclude 掉 kubezoo.io/platform-workload=true。租户的 kube-system 里跑着
-# 平台自己的 pod —— 目前是每租户的 CoreDNS —— 而这些 namespace 同样带 kubezoo.io/tenant,
-# 所以会被下面的 namespaceSelector 命中。给它们注入 kubezoo.io/pool 会把 resolver 调度到
-# 该租户的池节点上;那类节点(本部署里是虚拟 kubelet)不实现 ClusterIP,resolver 就永远
-# 不会 ready。唯一症状是"DNS 没生效",没有任何报错 —— 网关会正确地退回平台 resolver。
+# ⭐ 平台跑在租户 namespace 里的 pod(带 kubezoo.io/platform-workload=true,目前是每租户的
+# CoreDNS)**不豁免**,和租户负载一样被注入落点。曾经豁免过,理由是"池节点是虚拟 kubelet、
+# 不实现 ClusterIP,resolver 会永远 not ready"——**这条理由是错的**:knaas 的实现给每个
+# Service 建 Octavia LB 并把 VIP 设成该 Service 的 ClusterIP,所以 ClusterIP 从 capsule 真正
+# 可达(实测),member 取自 EndpointSlice 且按 readiness 门控。
+# ⭐ 而且 resolver **必须**落在池节点上:它自己的 pod IP 得是 OVN 地址才能当 Octavia member,
+# 否则租户的 capsule 反而够不到解析器。跑在平台的真 worker 上(Cilium 地址)才是坏的那种。
+# ⚠️ 万一某个部署的池节点确实跑不了 resolver,后果是有界的:网关只注入**正在 serving** 的
+# resolver,所以租户退回平台 DNS,不会掉进"dnsPolicy:None 且无人应答"。
 apiVersion: kyverno.io/v1
 kind: ClusterPolicy
 metadata:
@@ -38,12 +42,6 @@ spec:
                 matchExpressions:
                   - key: kubezoo.io/tenant
                     operator: Exists
-      exclude:
-        any:
-          - resources:
-              selector:
-                matchLabels:
-                  kubezoo.io/platform-workload: "true"
       mutate:
         patchesJson6902: |-
           - op: add
@@ -83,12 +81,6 @@ spec:
                 matchExpressions:
                   - key: kubezoo.io/tenant
                     operator: Exists
-      exclude:
-        any:
-          - resources:
-              selector:
-                matchLabels:
-                  kubezoo.io/platform-workload: "true"
       mutate:
         patchesJson6902: |-
           - op: add
@@ -128,12 +120,6 @@ spec:
                 matchExpressions:
                   - key: kubezoo.io/tenant
                     operator: Exists
-      exclude:
-        any:
-          - resources:
-              selector:
-                matchLabels:
-                  kubezoo.io/platform-workload: "true"
       mutate:
         patchesJson6902: |-
           - op: add
@@ -173,12 +159,6 @@ spec:
                 matchExpressions:
                   - key: kubezoo.io/tenant
                     operator: Exists
-      exclude:
-        any:
-          - resources:
-              selector:
-                matchLabels:
-                  kubezoo.io/platform-workload: "true"
       mutate:
         patchesJson6902: |-
           - op: add
