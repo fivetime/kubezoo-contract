@@ -1,0 +1,172 @@
+# kubezoo-controller:把上游集群对账成 Tenant 声明的样子。
+#
+# ⚠️ 装这一份之前先装 kubezoo-gateway —— 控制器要从 kubezoo 读 Tenant 对象,
+# kubezoo 不在它就起不来。反过来只装 proxy 也不行:那样集群会接受 Tenant 对象
+# 然后什么都不做,而且没有任何报错说缺了什么。
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kubezoo-controller
+---
+# ⭐⭐ 这份授权就是平台对控制器的信任面,值得逐条读,不要图省事换成 cluster-admin。
+#
+# 最要紧的是 escalate 和 bind:RBAC 默认不允许任何人创建一个"授予了自己并不持有的
+# 权限"的角色,而控制器恰恰要这么做 —— 它给每个租户建 `<租户ID>-cluster-admin`
+# 和 `*` on `*` 的 namespace admin 角色。escalate/bind 正是这条规则的官方豁免口。
+#
+# ⇒ 换句话说:**能改这个 ServiceAccount 的人,等于能在集群里造出任意权限。**
+# 它和 kubezoo 自己的凭据是平台里最该被看住的两个身份。
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kubezoo-controller
+rules:
+  # 租户的 namespace 由它创建;markFrozen 会改标签,所以要 update。
+  # ⚠️ delete 是拆除必需的,漏了它 deleteResources 会在第一步就 403,finalizer
+  # 永远不摘,Tenant 永远 Terminating —— 而运维顺手把 finalizer 剥掉之后,租户的
+  # namespace、secret 和 CR 就全留下了,等着下一个拿到同一个六位 id 的人。
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+  # 每个 namespace 一条授权租户的 RoleBinding,以及 ClusterRoleBinding 的投影。
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["rolebindings"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+  # 租户的集群级角色,和从投影派生出来的那些。
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["clusterroles", "clusterrolebindings"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # 上面那条允许"写这些对象",这一条允许"写进自己没有的权限"。分开列是为了让
+  # 它显眼:没有它,控制器建到一半就会被拒;有了它,它就是集群里的特权身份。
+  #
+  # ⚠️ 两个动词都授在 **clusterroles** 上,`bind` 尤其容易放错地方:
+  # 建 (Cluster)RoleBinding 时的提权检查问的是"你对 **roleRef 指的那个角色** 有
+  # bind 吗",而不是"你对 clusterrolebindings 有 bind 吗"。
+  # 实测把 bind 放在 clusterrolebindings 上,建绑定会被拒:
+  #   is attempting to grant RBAC permissions not currently held
+  # —— 而且那条报错完全不提 bind,看不出是授权对象放错了。
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["clusterroles"]
+    verbs: ["escalate", "bind"]
+
+  # 租户的 CRD 组决定了它的集群级角色里有哪些组,所以要 watch 变化 —— 而拆除时
+  # 还要删掉它们(删 CRD 会级联删掉该类型的全部 CR,这是清掉租户自定义资源的
+  # 唯一办法)。
+  - apiGroups: ["apiextensions.k8s.io"]
+    resources: ["customresourcedefinitions"]
+    verbs: ["get", "list", "watch", "delete"]
+
+  # 拆除时逐个集群级资源扫一遍,删掉名字带租户前缀的。⭐ 这里只需要列出
+  # **租户自己能创建的**集群级资源 —— 也就是 kubezoo-contract 的
+  # ClusterScopedRules 授出去的那一组,再加上它们的 CRD。别的集群级资源
+  # (nodes、apiservices、storageclasses……)租户根本建不出来,扫到 Forbidden
+  # 会被跳过并记 V(4),不再中断拆除。
+  #
+  # ⚠️ 这份清单和 ClusterScopedRules 必须一起改:那边多授一种租户能建的集群级
+  # 资源,这边不跟上,那种对象就会在租户删除后永久留下,而唯一的迹象是一条
+  # Warning 日志。
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingressclasses"]
+    verbs: ["list", "delete"]
+  - apiGroups: [""]
+    resources: ["persistentvolumes"]
+    verbs: ["list", "delete"]
+  - apiGroups: ["node.k8s.io"]
+    resources: ["runtimeclasses"]
+    verbs: ["list", "delete"]
+  - apiGroups: ["admissionregistration.k8s.io"]
+    resources: ["validatingwebhookconfigurations", "mutatingwebhookconfigurations"]
+    verbs: ["list", "delete"]
+
+  # 集群配额是可选组件。上游没装的话控制器会跳过它,不会因此起不来 ——
+  # 但授权留在这里,免得装了配额之后还要回来改这份文件。
+  - apiGroups: ["quota.kubezoo.io"]
+    resources: ["clusterresourcequotas"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kubezoo-controller
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kubezoo-controller
+subjects:
+  - kind: ServiceAccount
+    name: kubezoo-controller
+    namespace: default
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kubezoo-controller
+spec:
+  # ⛔ 不要往上加。没有 leader 选举也没有分片,第二个副本就是第二份控制器在对账
+  # 同一批租户 —— 幂等的写扛得住,但投影的孤儿清理在并发下没测过。
+  # 终态应该是按租户 ID 分片而不是主从,见 README。
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kubezoo-controller
+  template:
+    metadata:
+      labels:
+        app: kubezoo-controller
+    spec:
+      serviceAccountName: kubezoo-controller
+      containers:
+        - name: kubezoo-controller
+          # ⚠️ This pointed at kubezoo/kubezoo-controller:local-up, which does not
+          # exist -- not built here, and not on Docker Hub ("object not found").
+          # Nothing in the split ever built this image, so applying this manifest
+          # produced an ImagePullBackOff and, from the outside, a kubezoo that
+          # accepts Tenant objects and reconciles none of them.
+          image: ghcr.io/fivetime/kubezoo-controller:latest
+          imagePullPolicy: Always
+          args:
+            # Tenant 对象在 kubezoo 里,不在上游集群里。
+            - --kubezoo-kubeconfig=/etc/kubezoo/kubeconfig/kubezoo.kubeconfig
+            # 上游就是它自己跑的这个集群,所以用 in-cluster 配置 —— 上面那份
+            # ServiceAccount 授权就是给这条用的。
+            - --upstream-kubeconfig=/etc/kubezoo/upstream/upstream.kubeconfig
+            # 它要给每个租户签客户端证书,所以要私钥,不只是证书。
+            - --client-ca-file=/etc/kubezoo/pki/ca.pem
+            - --client-ca-key-file=/etc/kubezoo/pki/ca-key.pem
+            # 写进发给租户的那份 kubeconfig 里的地址。
+            # ⚠️⚠️ **这是占位符,部署前必须替换。** 这里要填的是**租户从集群外面
+            # 访问到的地址**,不是集群内的 Service 名 —— 上一版这里就写着 `kubezoo`,
+            # 那是 Service 名,租户拿到的 kubeconfig 会指向一个它根本解析不了的主机。
+            # ⚠️ 而且它必须在 gateway 服务证书的 SAN 里(见 gen_pki.sh 的
+            # KUBERNETES_HOSTNAMES),否则租户连上去就是证书校验失败。
+            - --kubezoo-address=10.224.18.51
+            - --kubezoo-port=6443
+            - --tenant-dns=true
+            - --tenant-dns-image=registry.k8s.io/coredns/coredns:v1.13.1
+            - --tenant-dns-replicas=2
+            - --tenant-dns-cluster-domain=cluster.local
+            - --v=4
+          volumeMounts:
+            - name: kubezoo-pki
+              mountPath: /etc/kubezoo/pki
+            - name: kubezoo-kubeconfig
+              mountPath: /etc/kubezoo/kubeconfig
+            - name: upstream-kubeconfig
+              mountPath: /etc/kubezoo/upstream
+      volumes:
+        # ⭐ 只有控制器拿签名私钥。kubezoo-gateway 只验证租户证书(用 ca.pem),
+        # 不签发,所以它的 kubezoo-pki Secret 里**没有** ca-key.pem ——
+        # 租户信任链的根只待在一个 Pod 里,而不是两个。
+        # 两份都由 kubezoo-gateway 的 hack/lib/gen_pki.sh 生成,必须同一个 CA。
+        - name: kubezoo-pki
+          secret:
+            secretName: kubezoo-ca
+        - name: kubezoo-kubeconfig
+          secret:
+            secretName: kubezoo-controller-kubeconfig
+        - name: upstream-kubeconfig
+          secret:
+            secretName: kubezoo-upstream-kubeconfig

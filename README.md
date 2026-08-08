@@ -90,6 +90,15 @@ kubezoo-gateway 和某个数据面实现(kubezun / kubetron),而不是 gateway �
   `kubezoo.io/cluster-ip`,kubezoo 翻译后报给租户,**租户的 CoreDNS 因此自动答对,
   一行不用改**。⛔ 方向和 `lbipam.cilium.io/ips` 相反:平台写、租户只读。
 
+## 真实部署样例(`config/deployment-example/`)
+
+一套**实际在跑**的清单存档(control1,上游是 Kamaji 托管控制面),从那台机器原样取回、
+删掉凭据。⛔ 不是推荐配置,是"已知能跑起来"的记录 —— 在此之前它只存在于一台机器的磁盘上。
+
+⚠️ 里面的地址是**真值不是占位符**,抄之前先改。用占位符换掉它们正是
+`kubezoo-gateway/config/setup/controller.yaml` 踩过的坑:那份清单里的
+`KUBEZOO_EXTERNAL_ADDRESS_PLACEHOLDER` 从来没人替换,**按构造就不可用**。
+
 ## 策略层(`config/policy/`)
 
 Kyverno 和原生 `ValidatingAdmissionPolicy` 的规则:PSA 等价约束、落点注入、

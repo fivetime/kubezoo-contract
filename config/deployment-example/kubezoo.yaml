@@ -1,0 +1,238 @@
+# kubezoo-gateway:租户 API 的入口,加上它自己那套 etcd(只存 Tenant/Quota 这些
+# kubezoo 自有对象,不存租户的工作负载)。
+#
+# ⚠️ 这一份**不够**。租户控制器是另一个部署(kubezoo-controller),只装这一份的话,
+# 集群会**接受 Tenant 对象然后什么都不做** —— 没有 namespace、没有 RoleBinding,
+# 而且没有任何报错指向缺了什么。两份都要装。
+#
+# 为什么分开:apiserver 是全活的,控制器不是。合在一起的话每个 kubezoo 副本都会跑
+# 一份控制器,三副本就是三份同时对账同一批租户。
+
+# KubeZoo statefulset
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: kubezoo
+spec:
+  serviceName: kubezoo
+  # 代理是无状态的,可以往上加 —— 但先读 kubezoo-controller 的 README:
+  # 控制器目前只能跑一个副本,这两个数字是分开的。
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kubezoo
+  template:
+    metadata:
+      labels:
+        app: kubezoo
+    spec:
+      # ⛔ The image runs as uid 65532, and the audit log is a hostPath that the
+      # kubelet creates root-owned 0755 -- so kubezoo died at startup with
+      # "ensureLogFile: open /var/log/kubezoo/audit.log: permission denied".
+      #
+      # ⭐ Two changes that are each right on their own: running the container as
+      # a non-root user, and keeping the audit log outside the container so it
+      # survives the incident being investigated. Neither is the thing to undo,
+      # so the directory is handed over instead.
+      #
+      # ⚠️ hack/lab/up.sh never met this: there kubezoo is a local binary running
+      # as root, writing to a file in the lab directory. The container path is the
+      # only one that exercises it, and only this manifest takes it.
+      initContainers:
+      - name: audit-log-permissions
+        image: busybox:1.36
+        command: ["sh", "-c", "chown 65532:65532 /var/log/kubezoo"]
+        securityContext:
+          runAsUser: 0
+        volumeMounts:
+        - name: audit-log
+          mountPath: /var/log/kubezoo
+      containers:
+      - name: kubezoo
+        image: ghcr.io/fivetime/kubezoo:latest
+        imagePullPolicy: Always
+        args:
+        - --allow-privileged=true
+        - --apiserver-count=1
+        - --cors-allowed-origins=.*
+        - --delete-collection-workers=1
+        - --etcd-prefix=/zoo
+        - --etcd-servers=http://kubezoo-etcd-0.kubezoo-etcd:2379
+        - --event-ttl=1h0m0s
+        - --max-requests-inflight=1002
+        - --service-cluster-ip-range=192.168.0.1/16
+        - --service-node-port-range=20000-32767
+        - --storage-backend=etcd3
+        - --authorization-mode=AlwaysAllow
+        - --client-ca-file=/etc/kubezoo/pki/ca.pem
+        - --tls-cert-file=/etc/kubezoo/pki/kubernetes.pem
+        - --tls-private-key-file=/etc/kubezoo/pki/kubernetes-key.pem
+        - --service-account-key-file=/etc/upstream/pki/sa.pub
+        - --service-account-issuer=kubezoo
+        - --service-account-issuer=https://kubernetes.default.svc.cluster.local
+        - --service-account-signing-key-file=/etc/upstream/pki/sa.key
+        - --proxy-client-cert-file=/etc/upstream/pki/client.crt
+        - --proxy-client-key-file=/etc/upstream/pki/client-key.crt
+        - --proxy-client-ca-file=/etc/upstream/pki/ca.crt
+        - --request-timeout=10m
+        - --watch-cache=true
+        - --proxy-upstream-master=https://kubezoo-upstream.kamaji.svc:6443
+        # ⚠️ 上游默认就是 true;kubezoo 曾主动关掉,三处都没写原因。
+        # 它**只管旧式(Secret 型)token** —— bound token(pod 用的投影 token)走的是
+        # 另一个认证器,getter 无条件传入,每次都查 SA 是否还在、UID 是否匹配。
+        # 所以关掉它省不下 pod 热路径的任何开销(那条路的 issuer 不是 LegacyIssuer,
+        # 根本不进 legacy 认证器),省下的只有旧式 token 那一次查询 ——
+        # 代价是删掉 SA 之后,手工建的 kubernetes.io/service-account-token
+        # **永不失效**(那种 token 没有过期时间)。取证吊销场景下这是个真口子。
+        - --service-account-lookup=true
+        # ⚠️ 必须含上游的 audience/issuer:kubezoo 把 TokenRequest 转发给上游,
+        # 拿回来的 token 是上游签的。只写 kubezoo 会让所有租户 SA token 认证失败,
+        # 症状是租户跑的 operator 全部 Unauthorized,而 kubezoo 侧看不出异常。
+        - --api-audiences=kubezoo,https://kubernetes.default.svc.cluster.local
+        # ⭐ Audit, and not optional for a platform that intends to freeze a
+        # tenant for an investigation. kubezoo impersonates the tenant upstream,
+        # so what it FORWARDS is attributable in the upstream audit log -- but
+        # what it REFUSES never gets there, and neither do writes to Tenant
+        # objects, which live in kubezoo's own store. Without this, a tenant's
+        # blocked attempts and the freeze itself are recorded nowhere.
+        - --audit-policy-file=/etc/kubezoo/audit/policy.yaml
+        - --audit-log-path=/var/log/kubezoo/audit.log
+        - --audit-log-maxsize=100
+        - --audit-log-maxbackup=10
+        - --audit-log-maxage=90
+        - --tenant-dns=true
+        - --tenant-dns-cluster-domain=cluster.local
+        - --v=4
+        ports:
+        - containerPort: 6443
+          name: secure-port
+        - containerPort: 8080
+          name: insecure-port
+        volumeMounts:
+        - name: kubezoo-pki
+          mountPath: /etc/kubezoo/pki
+        - name: upstream-pki
+          mountPath: /etc/upstream/pki
+        - name: audit-policy
+          mountPath: /etc/kubezoo/audit
+          readOnly: true
+        - name: audit-log
+          mountPath: /var/log/kubezoo
+      volumes:
+      # ⭐ kubezoo-pki no longer carries ca-key.pem. Issuing tenant certificates
+      # moved to kubezoo-controller, so the root of the tenant trust chain lives
+      # in one pod instead of two. Mounting it here as well would have been the
+      # blast radius of a process that signs nothing.
+      - name: kubezoo-pki
+        secret:
+          secretName: kubezoo-pki
+      - name: upstream-pki
+        secret:
+          secretName: upstream-pki
+      - name: audit-policy
+        configMap:
+          name: kubezoo-audit-policy
+      # ⚠️ hostPath, so the log survives the pod. An audit log inside the
+      # container filesystem is gone at the moment it becomes evidence -- a
+      # restart, a reschedule, or the eviction that follows the incident being
+      # investigated. Point this at whatever the platform actually collects from.
+      - name: audit-log
+        hostPath:
+          path: /var/log/kubezoo
+          type: DirectoryOrCreate
+---
+# The audit policy, from config/setup/audit-policy.yaml. Kept as a ConfigMap
+# rather than baked into the image so that trimming it does not need a rebuild.
+#
+# ⚠️ In the SAME namespace this file is applied to -- the manifests here carry no
+# namespace, so that is `default` unless you pass one. This line said kube-system,
+# and following it leaves kubezoo-0 in ContainerCreating for ever with
+# "MountVolume.SetUp failed ... configmap kubezoo-audit-policy not found", which
+# names the configmap and not the namespace it looked in.
+#
+#   kubectl create configmap kubezoo-audit-policy \
+#     --from-file=policy.yaml=config/setup/audit-policy.yaml
+---
+# KubeZoo service
+apiVersion: v1
+kind: Service
+metadata:
+  name: kubezoo
+  labels:
+    io.cilium/ip-pool-private: "true"
+    io.cilium/bgp-advertise-external-ip: "true"
+  annotations:
+    io.cilium/lb-ipam-ips: "10.224.18.51"
+spec:
+  type: LoadBalancer
+  selector:
+    app: kubezoo
+  ports:
+  - name: secure-port
+    port: 6443
+    protocol: TCP
+    targetPort: 6443
+  # ⚠️ 443 不是可有可无的第二个端口。租户 pod 里的代码写的是
+  # https://kubernetes.default.svc —— 隐含 443。控制器给每个租户建的那个
+  # headless kubernetes Service 只返回 kubezoo 的地址,不做端口转换,
+  # 所以 kubezoo 必须自己在 443 上听,否则那条路只表现为连接被拒。
+  - name: https-443
+    port: 443
+    protocol: TCP
+    targetPort: 6443
+---
+# KubeZoo Etcd StatefulSet
+apiVersion: apps/v1
+kind: StatefulSet
+metadata: 
+  name: kubezoo-etcd
+spec:
+  serviceName: kubezoo-etcd
+  replicas: 1
+  selector:
+    matchLabels: 
+      app: kubezoo-etcd 
+  template:
+    metadata:
+      labels:
+        app: kubezoo-etcd
+    spec:
+      containers:
+      - name: kubezoo-etcd
+        image: quay.io/coreos/etcd:v3.6.12
+        imagePullPolicy: Always
+        env:
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        command:
+        - etcd
+        args:
+        - --listen-client-urls=http://0.0.0.0:2379
+        - --advertise-client-urls=http://$(POD_NAME).kubezoo-etcd:2379
+        - --data-dir=/var/lib/etcd
+        volumeMounts:
+        - name: data
+          mountPath: /var/lib/etcd
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+    spec:
+      accessModes: [ReadWriteOnce]
+      storageClassName: nvme-rep3-rbd-pool
+      resources:
+        requests:
+          storage: 8Gi
+---
+# KubeZoo Etcd service
+apiVersion: v1
+kind: Service
+metadata:
+  name: kubezoo-etcd
+spec: 
+  type: ClusterIP
+  # make it headless service as it only need to be accessed by KubeZoo
+  clusterIP: None
+  selector: 
+    app: kubezoo-etcd
