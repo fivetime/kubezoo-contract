@@ -57,4 +57,5 @@
 
 - 策略层:`config/policy/`(⚠️ 本部署跑的是 knaas 自己那套 `knaas-tenant-*`,
   和这里交付的 `tenant-*` **不是同一份**,选的标签键也不同)
-- 数据面契约:`docs/dataplane-cluster-ip-cn.md`
+- 数据面契约:`docs/dataplane-cluster-ip-cn.md`、`docs/dataplane-openstack-cn.md`
+  (租户档案 Secret 的形状在后者;示例含凭据占位,故只在文档里,不进本目录)
